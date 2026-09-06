@@ -1,0 +1,77 @@
+plugins {
+    alias(libs.plugins.android.application)
+}
+
+android {
+    namespace 'com.tri.djicontrol'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.tri.djicontrol"
+        minSdk 30
+        targetSdk 33
+        versionCode 1
+        versionName "1.0"
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    packagingOptions {
+        doNotStrip "*/*/libdjivideo.so"
+        doNotStrip "*/*/libSDKRelativeJNI.so"
+        doNotStrip "*/*/libFlyRecord.so"
+        doNotStrip "*/*/libupgradeclient.so"
+        doNotStrip "*/*/libOpenedSDK.so"
+
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    packagingOptions {
+        doNotStrip "*/*/libdjivideo.so"
+        doNotStrip "*/*/libSDKRelativeJNI.so"
+        doNotStrip "*/*/libFlyRecord.so"
+        doNotStrip "*/*/libupgradeclient.so"
+        doNotStrip "*/*/libOpenedSDK.so"
+        doNotStrip "*/*/libDJICSDKCommon.so"
+        doNotStrip "*/*/libDJIFlySafeCore.so"
+        doNotStrip "*/*/libDJIMOP.so"
+        doNotStrip "*/*/libDJISDKLOGJNI.so"
+        doNotStrip "*/*/libDJIUpgradeCore.so"
+        doNotStrip "*/*/libDJIUpgradeJNI.so"
+
+        // BỔ SUNG THÊM CÁC FILE ĐANG BỊ BÁO LỖI VÀO ĐÂY ĐỂ TRÁNH VĂNG APP
+        doNotStrip "*/*/libLiveviewARCore.so"
+        doNotStrip "*/*/libwaes.so"
+        doNotStrip "*/*/libyuv2.so"
+        doNotStrip "*/*/libDjiLiveviewAR.so"
+        doNotStrip "*/*/libnative-buffer.so"
+
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+    }
+}
+
+dependencies {
+
+    implementation libs.appcompat
+    implementation libs.material
+    implementation libs.activity
+    implementation libs.constraintlayout
+
+    implementation ('com.dji:dji-sdk:4.17')
+    compileOnly ('com.dji:dji-sdk-provided:4.17')
+    testImplementation libs.junit
+    androidTestImplementation libs.ext.junit
+    androidTestImplementation libs.espresso.core
+}

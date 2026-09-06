@@ -1,0 +1,349 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- Khung hiển thị luồng Camera trực tiếp từ Drone -->
+    <TextureView
+        android:id="@+id/video_preview_texture_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- TOP CENTER: Trạng thái kết nối, Pin, RC & Tìm drone -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#99000000"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp"
+        android:layout_centerHorizontal="true"
+        android:layout_alignParentTop="true"
+        android:layout_marginTop="8dp"
+        android:gravity="center">
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Trạng thái: Đang kết nối..."
+            android:textColor="#00E676"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="2dp"/>
+
+        <TextView
+            android:id="@+id/tvGpsAndSdStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="GPS: 0 | Pin: --% | RC: --% | Tìm drone..."
+            android:textColor="#FFEB3B"
+            android:textSize="11sp"/>
+    </LinearLayout>
+
+    <!-- BOTTOM-LEFT: MINI MAP VIEW -->
+    <LinearLayout
+        android:layout_width="200dp"
+        android:layout_height="120dp"
+        android:orientation="vertical"
+        android:background="#B3000000"
+        android:padding="4dp"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentBottom="true"
+        android:layout_margin="10dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#FFFFFF">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Google Map View"
+                android:textColor="#666666"
+                android:textSize="11sp"
+                android:layout_gravity="center"/>
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- TOP-LEFT: TAB MENU CÀI ĐẶT -->
+    <LinearLayout
+        android:layout_width="250dp"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#CC111111"
+        android:padding="8dp"
+        android:layout_marginTop="10dp"
+        android:layout_alignParentStart="true"
+        android:layout_marginStart="10dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="6dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="⚙️ MENU NHIỆM VỤ"
+                android:textColor="#00E676"
+                android:textSize="12sp"
+                android:textStyle="bold"/>
+
+            <Button
+                android:id="@+id/btnToggleMenu"
+                android:layout_width="45dp"
+                android:layout_height="24dp"
+                android:text="THU"
+                android:textSize="9sp"
+                android:backgroundTint="#444444"
+                android:textColor="#FFFFFF"
+                android:padding="0dp"/>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/layoutMenuContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="visible">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="4dp">
+                <TextView android:layout_width="60dp" android:layout_height="wrap_content" android:text="Cao(m):" android:textColor="#FFF" android:textSize="11sp"/>
+                <EditText
+                    android:id="@+id/edtAltitude"
+                    android:layout_width="match_parent"
+                    android:layout_height="28dp"
+                    android:inputType="numberDecimal"
+                    android:text="5.0"
+                    android:textColor="#000"
+                    android:background="#FFF"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="4dp">
+                <TextView android:layout_width="60dp" android:layout_height="wrap_content" android:text="Lat:" android:textColor="#FFF" android:textSize="11sp"/>
+                <EditText
+                    android:id="@+id/edtLat"
+                    android:layout_width="match_parent"
+                    android:layout_height="28dp"
+                    android:inputType="numberDecimal|numberSigned"
+                    android:text="10.82310"
+                    android:textColor="#000"
+                    android:background="#FFF"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="6dp">
+                <TextView android:layout_width="60dp" android:layout_height="wrap_content" android:text="Lng:" android:textColor="#FFF" android:textSize="11sp"/>
+                <EditText
+                    android:id="@+id/edtLng"
+                    android:layout_width="match_parent"
+                    android:layout_height="28dp"
+                    android:inputType="numberDecimal|numberSigned"
+                    android:text="106.62970"
+                    android:textColor="#000"
+                    android:background="#FFF"
+                    android:textSize="11sp"
+                    android:gravity="center"/>
+            </LinearLayout>
+
+            <RadioGroup
+                android:id="@+id/radioGroupMode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginBottom="4dp">
+                <RadioButton
+                    android:id="@+id/rbPhoto"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Chụp ảnh"
+                    android:textColor="#FFF"
+                    android:checked="true"
+                    android:textSize="11sp"
+                    android:layout_marginEnd="8dp"/>
+                <RadioButton
+                    android:id="@+id/rbVideo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Quay video"
+                    android:textColor="#FFF"
+                    android:textSize="11sp"/>
+            </RadioGroup>
+
+            <!-- Nút FORMAT THẺ NHỚ -->
+            <Button
+                android:id="@+id/btnFormatSd"
+                android:layout_width="match_parent"
+                android:layout_height="35dp"
+                android:text="FORMAT THẺ NHỚ"
+                android:textColor="#FFFFFF"
+                android:backgroundTint="#FF9800"
+                android:textSize="11sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- BOTTOM-RIGHT: TELEMETRY, GIMBAL, NÚT MODE, XEM ẢNH, CHỤP, START & CANCEL -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_alignParentEnd="true"
+        android:layout_alignParentBottom="true"
+        android:gravity="bottom"
+        android:layout_margin="10dp">
+
+        <!-- Thông số Telemetry & Số ảnh đã chụp -->
+        <LinearLayout
+            android:layout_width="160dp"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#B3000000"
+            android:padding="6dp"
+            android:layout_marginEnd="8dp"
+            android:layout_gravity="bottom">
+
+            <TextView
+                android:id="@+id/tvTelemetry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Cao: 0.0m | Tốc độ: 0.0m/s\nCách đích: 0.0m"
+                android:textColor="#00E6FF"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:gravity="center"
+                android:layout_marginBottom="3dp"/>
+
+            <TextView
+                android:id="@+id/tvPhotoCount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Ảnh đã chụp: 0 tấm"
+                android:textColor="#FF9800"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:gravity="center"/>
+        </LinearLayout>
+
+        <!-- Thanh điều khiển Gimbal -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="160dp"
+            android:orientation="vertical"
+            android:background="#80000000"
+            android:padding="4dp"
+            android:gravity="center"
+            android:layout_marginEnd="8dp"
+            android:layout_gravity="bottom">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="0°" android:textColor="#FFF" android:textSize="9sp"/>
+            <FrameLayout
+                android:layout_width="24dp"
+                android:layout_height="110dp"
+                android:layout_gravity="center">
+                <SeekBar
+                    android:id="@+id/seekBarGimbal"
+                    android:layout_width="110dp"
+                    android:layout_height="24dp"
+                    android:rotation="270"
+                    android:layout_gravity="center"
+                    android:max="90"
+                    android:progress="90"/>
+            </FrameLayout>
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="-90°" android:textColor="#FFF" android:textSize="9sp"/>
+        </LinearLayout>
+
+        <!-- Cụm các nút điều khiển bên phải -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_gravity="bottom">
+
+            <!-- Nút chuyển chế độ Quay / Chụp (MODE) -->
+            <Button
+                android:id="@+id/btnToggleCameraMode"
+                android:layout_width="65dp"
+                android:layout_height="34dp"
+                android:text="PHOTO"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:backgroundTint="#607D8B"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="3dp"/>
+
+            <!-- Nút Xem ảnh và Tải về điện thoại -->
+            <Button
+                android:id="@+id/btnViewPhotos"
+                android:layout_width="65dp"
+                android:layout_height="34dp"
+                android:text="XEM ẢNH"
+                android:textSize="9sp"
+                android:textStyle="bold"
+                android:backgroundTint="#9C27B0"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="3dp"/>
+
+            <!-- Nút chụp ảnh thủ công -->
+            <Button
+                android:id="@+id/btnCaptureManual"
+                android:layout_width="65dp"
+                android:layout_height="34dp"
+                android:text="CHỤP"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:backgroundTint="#03A9F4"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="3dp"/>
+
+            <!-- Nút bắt đầu bay tự động -->
+            <Button
+                android:id="@+id/btnStart"
+                android:layout_width="65dp"
+                android:layout_height="50dp"
+                android:text="START"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:backgroundTint="#4CAF50"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="3dp"/>
+
+            <!-- Nút hủy nhiệm vụ -->
+            <Button
+                android:id="@+id/btnCancel"
+                android:layout_width="65dp"
+                android:layout_height="34dp"
+                android:text="HỦY"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:backgroundTint="#D32F2F"
+                android:textColor="#FFFFFF"/>
+        </LinearLayout>
+    </LinearLayout>
+
+</RelativeLayout>
