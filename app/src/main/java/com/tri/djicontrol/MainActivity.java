@@ -1,5 +1,6 @@
 package com.tri.djicontrol;
 
+import android.content.Intent;
 import android.graphics.SurfaceTexture;
 import android.os.Bundle;
 import android.view.View;
@@ -12,7 +13,13 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-
+import org.maplibre.android.MapLibre;
+import org.maplibre.android.maps.MapLibreMap;
+import org.maplibre.android.maps.MapView;
+import org.maplibre.android.maps.Style;
+import org.maplibre.android.geometry.LatLng;
+import org.maplibre.android.annotations.Marker;
+import org.maplibre.android.annotations.MarkerOptions;
 import com.tri.djicontrol.connection.DJIConnectionManager;
 import com.tri.djicontrol.flight.FlightMissionManager;
 
@@ -53,13 +60,82 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private boolean isMenuVisible = true;
     private boolean isCurrentModePhoto = true;
     private boolean isRecordingVideo = false;
-
+    private View miniMap;
+    private MapView miniMapView;
+    private MapLibreMap miniMapLibreMap;
+    private Marker droneMarker;
+    private LatLng lastDroneLocation;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Khởi tạo MapLibre
+        MapLibre.getInstance(this);
+
         setContentView(R.layout.activity_main);
 
+        // =========================
+        // MAP NHỎ TRÊN MÀN HÌNH CHÍNH
+        // =========================
+        miniMap = findViewById(R.id.miniMap);
+        miniMapView = findViewById(R.id.miniMapView);
+
+        // Khởi tạo MapView
+        miniMapView.onCreate(savedInstanceState);
+
+        miniMapView.getMapAsync(mapLibreMap -> {
+
+            miniMapLibreMap = mapLibreMap;
+
+            // Load OpenStreetMap
+            miniMapLibreMap.setStyle(
+                    new Style.Builder().fromUri("asset://osm_style.json"),
+                    style -> {
+
+                        // Vị trí mặc định ban đầu
+                        LatLng droneLocation = new LatLng(
+                                10.82310,
+                                106.62970
+                        );
+
+                        // Đưa camera tới vị trí drone
+                        miniMapLibreMap.setCameraPosition(
+                                new org.maplibre.android.camera.CameraPosition.Builder()
+                                        .target(droneLocation)
+                                        .zoom(13.0)
+                                        .build()
+                        );
+
+                        // Marker vị trí drone
+                        droneMarker = miniMapLibreMap.addMarker(
+                                new MarkerOptions()
+                                        .position(droneLocation)
+                                        .title("Vị trí drone")
+                        );
+                    }
+            );
+
+            // =========================
+            // BẤM MAP NHỎ -> MAP LỚN
+            // =========================
+            miniMapLibreMap.addOnMapClickListener(point -> {
+
+                Intent intent = new Intent(
+                        MainActivity.this,
+                        MapActivity.class
+                );
+
+                startActivity(intent);
+
+                return true;
+            });
+        });
+
+        // =========================
+        // CÁC VIEW CŨ
+        // =========================
         tvStatus = findViewById(R.id.tvStatus);
+
         tvGpsAndSdStatus = findViewById(R.id.tvGpsAndSdStatus);
         tvTelemetry = findViewById(R.id.tvTelemetry);
         tvPhotoCount = findViewById(R.id.tvPhotoCount);
@@ -164,6 +240,45 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                     int satellites = state.getSatelliteCount();
                                     float currentAlt = state.getAircraftLocation() != null ? state.getAircraftLocation().getAltitude() : 0.0f;
 
+                                    // =========================
+                                    // CẬP NHẬT VỊ TRÍ DRONE TRÊN MAP
+                                    // =========================
+                                    if (state.getAircraftLocation() != null) {
+
+                                        double droneLat = state.getAircraftLocation().getLatitude();
+                                        double droneLng = state.getAircraftLocation().getLongitude();
+
+                                        if (!Double.isNaN(droneLat) && !Double.isNaN(droneLng)) {
+
+                                            lastDroneLocation = new LatLng(droneLat, droneLng);
+
+                                            runOnUiThread(() -> {
+
+                                                if (miniMapLibreMap != null) {
+
+                                                    if (droneMarker == null) {
+
+                                                        droneMarker = miniMapLibreMap.addMarker(
+                                                                new MarkerOptions()
+                                                                        .position(lastDroneLocation)
+                                                                        .title("Vị trí drone")
+                                                        );
+
+                                                    } else {
+
+                                                        droneMarker.setPosition(lastDroneLocation);
+                                                    }
+
+                                                    miniMapLibreMap.setCameraPosition(
+                                                            new org.maplibre.android.camera.CameraPosition.Builder()
+                                                                    .target(lastDroneLocation)
+                                                                    .zoom(13.0)
+                                                                    .build()
+                                                    );
+                                                }
+                                            });
+                                        }
+                                    }
                                     float velocityX = state.getVelocityX();
                                     float velocityY = state.getVelocityY();
                                     float speed = (float) Math.sqrt(velocityX * velocityX + velocityY * velocityY);
@@ -473,25 +588,69 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     }
 
     @Override
-    protected void onResume() {
-        super.onResume();
-        if (videoSurface != null && videoSurface.isAvailable()) {
-            if (codecManager == null) {
-                codecManager = new DJICodecManager(this, videoSurface.getSurfaceTexture(), videoSurface.getWidth(), videoSurface.getHeight());
-            }
+    protected void onStart() {
+        super.onStart();
+
+        if (miniMapView != null) {
+            miniMapView.onStart();
         }
     }
 
     @Override
+    protected void onPause() {
+
+        if (miniMapView != null) {
+            miniMapView.onPause();
+        }
+
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+
+        if (miniMapView != null) {
+            miniMapView.onStop();
+        }
+
+        super.onStop();
+    }
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (miniMapView != null) {
+            miniMapView.onResume();
+        }
+
+        if (videoSurface != null && videoSurface.isAvailable()) {
+            if (codecManager == null) {
+                codecManager = new DJICodecManager(
+                        this,
+                        videoSurface.getSurfaceTexture(),
+                        videoSurface.getWidth(),
+                        videoSurface.getHeight()
+                );
+            }
+        }
+    }
+    @Override
     protected void onDestroy() {
-        super.onDestroy();
+
+        if (miniMapView != null) {
+            miniMapView.onDestroy();
+        }
+
         if (missionManager != null) {
             missionManager.cancelMission();
         }
+
         if (codecManager != null) {
             codecManager.cleanSurface();
             codecManager = null;
         }
+
+        super.onDestroy();
     }
 
     @Override
