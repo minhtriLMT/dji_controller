@@ -228,6 +228,33 @@ public class FlightMissionManager {
         }
     }
 
+    public void startReturnToHome() {
+
+        if (flightController == null) {
+            Log.e(TAG, "FlightController chưa sẵn sàng!");
+            return;
+        }
+
+        isMissionRunning = false;
+
+        if (missionRunnable != null) {
+            missionHandler.removeCallbacks(missionRunnable);
+        }
+
+        flightController.setVirtualStickModeEnabled(false, djiError -> {
+
+            flightController.startGoHome(error -> {
+
+                if (error == null) {
+                    Log.d(TAG, "Đã kích hoạt RTH!");
+                } else {
+                    Log.e(TAG, "RTH thất bại: " + error.getDescription());
+                }
+
+            });
+
+        });
+    }
     public void cancelMission() {
         isMissionRunning = false;
         if (missionRunnable != null) {
