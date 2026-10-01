@@ -54,6 +54,7 @@ public class MapActivity extends AppCompatActivity {
     private int draggingMarkerIndex = -1;
 
     private double currentAreaHa = 0.0;
+    private boolean isSatelliteStyle = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,6 +63,18 @@ public class MapActivity extends AppCompatActivity {
         MapLibre.getInstance(this);
 
         setContentView(R.layout.activity_map);
+        Button btnToggleSatellite = findViewById(R.id.btnToggleSatellite);
+        btnToggleSatellite.setOnClickListener(v -> {
+            if (mapLibreMap != null) {
+                isSatelliteStyle = !isSatelliteStyle;
+                String styleUrl = isSatelliteStyle ? "asset://satellite_style.json" : "asset://osm_style.json";
+
+                // Load lại style
+                mapLibreMap.setStyle(new Style.Builder().fromUri(styleUrl), style -> {
+                    // Giữ lại các layer polygon và line nếu cần thiết
+                });
+            }
+        });
 
         mapView = findViewById(R.id.mapView);
         btnConfirmTarget = findViewById(R.id.btnConfirmTarget);

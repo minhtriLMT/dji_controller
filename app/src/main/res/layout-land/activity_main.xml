@@ -214,19 +214,20 @@
             android:id="@+id/miniMapView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
+        <Button
+            android:id="@+id/btnToggleSatellite"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="6dp"
+            android:backgroundTint="#455A64"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:text="🛰️"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp" />
 
-<!--        &lt;!&ndash; Nút mở bản đồ lớn &ndash;&gt;-->
-<!--        <TextView-->
-<!--            android:id="@+id/btnOpenFullMap"-->
-<!--            android:layout_width="22dp"-->
-<!--            android:layout_height="20dp"-->
-<!--            android:layout_gravity="top|end"-->
-<!--            android:layout_margin="4dp"-->
-<!--            android:background="#DDFFFFFF"-->
-<!--            android:gravity="center"-->
-<!--            android:text="◎"-->
-<!--            android:textColor="#222222"-->
-<!--            android:textSize="18sp" />-->
 
         <!-- Tiêu đề phía dưới -->
         <TextView
