@@ -165,7 +165,7 @@ public class StorageAdapter extends BaseAdapter {
 
         dialog.setContentView(rootLayout);
 
-        // Thư mục lưu ảnh gốc trên máy
+        // Thư mục lưu ảnh gốc tạm thời trên máy
         File destDir = new File(context.getExternalFilesDir(null), "DJI_Downloads");
         if (!destDir.exists()) destDir.mkdirs();
         File downloadedFile = new File(destDir, mediaFile.getFileName());
@@ -185,7 +185,7 @@ public class StorageAdapter extends BaseAdapter {
                 @Override
                 public void onSuccess(String filePath) {
                     ((MainActivity) context).runOnUiThread(() -> {
-                        // Tải xong -> Trích xuất dữ liệu Ngày giờ, GPS và hiển thị cho người dùng xem
+                        // Tải xong -> Trích xuất dữ liệu Ngày giờ, GPS và lưu thẳng vào thư viện điện thoại
                         processAndShowMetadata(context, filePath, false);
                     });
                 }
@@ -254,10 +254,44 @@ public class StorageAdapter extends BaseAdapter {
             String metaInfo = "Thời gian chụp: " + displayTime + "\n" + gpsInfo;
 
             if (!forFirebase) {
-                // Xử lý khi nhấn Tải về máy: Hiển thị Dialog thông báo chi tiết
+                // 3. Lưu ảnh vào Thư viện ảnh chung của điện thoại (Gallery)
+                File sourceFile = new File(filePath);
+                if (sourceFile.exists()) {
+                    android.content.ContentValues values = new android.content.ContentValues();
+                    values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, sourceFile.getName());
+                    values.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                        values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DJI_Captured_Photos");
+                        values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
+                    }
+
+                    android.content.ContentResolver resolver = context.getContentResolver();
+                    android.net.Uri collection = android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                    android.net.Uri imageUri = resolver.insert(collection, values);
+
+                    if (imageUri != null) {
+                        try (java.io.OutputStream out = resolver.openOutputStream(imageUri);
+                             java.io.InputStream in = new java.io.FileInputStream(sourceFile)) {
+                            byte[] buffer = new byte[4096];
+                            int read;
+                            while ((read = in.read(buffer)) != -1) {
+                                out.write(buffer, 0, read);
+                            }
+                        }
+
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            values.clear();
+                            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
+                            resolver.update(imageUri, values, null, null);
+                        }
+                    }
+                }
+
+                // Hiển thị hộp thoại thông báo đã lưu vào Thư Viện
                 android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(context);
-                builder.setTitle("Tải ảnh thành công!");
-                builder.setMessage("Đã lưu tại: " + filePath + "\n\n--- THÔNG TIN ẢNH ---\n" + metaInfo);
+                builder.setTitle("Đã lưu vào Thư Viện Ảnh!");
+                builder.setMessage("Ảnh đã xuất hiện trong bộ sưu tập (Thư mục: DJI_Captured_Photos).\n\n--- THÔNG TIN ẢNH ---\n" + metaInfo);
                 builder.setPositiveButton("ĐÓNG", null);
                 builder.show();
             } else {

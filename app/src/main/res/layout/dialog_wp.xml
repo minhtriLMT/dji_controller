@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <ScrollView
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -42,7 +41,6 @@
                 android:textSize="13sp" />
 
         </LinearLayout>
-
 
         <!-- KHU VỰC GIÁM SÁT -->
         <TextView
@@ -88,7 +86,6 @@
                 android:textSize="9sp" />
 
         </LinearLayout>
-
 
         <!-- THÔNG SỐ BAY -->
         <TextView
@@ -170,7 +167,6 @@
 
         </LinearLayout>
 
-
         <!-- CAMERA -->
         <TextView
             android:layout_width="match_parent"
@@ -211,7 +207,6 @@
 
         </LinearLayout>
 
-
         <!-- NÚT -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -229,7 +224,7 @@
 
             <Space
                 android:layout_width="8dp"
-                android:layout_height="1dp" />
+                android:layout_height="match_parent" />
 
             <Button
                 android:id="@+id/btnCreateWP"
@@ -239,8 +234,19 @@
                 android:text="TẠO LỘ TRÌNH"
                 android:textSize="9sp" />
 
-        </LinearLayout>
+            <Space
+                android:layout_width="8dp"
+                android:layout_height="match_parent" />
 
+            <Button
+                android:id="@+id/btnStartMapping"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:text="BẮT ĐẦU QUÉT"
+                android:textSize="9sp" />
+
+        </LinearLayout>
 
         <Button
             android:id="@+id/btnConfirmWP"

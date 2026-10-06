@@ -12,20 +12,26 @@
 
     <!-- === ĐÃ THÊM MỚI VÀO ĐÂY: Nút chuyển bản đồ Vệ tinh === -->
     <Button
-        android:id="@+id/btnToggleSatellite"
+        android:id="@+id/btnMapType"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Đổi Bản Đồ" />
+    <!-- ======================================================= -->
+    <!-- Nút quay về vị trí của tôi -->
+    <Button
+        android:id="@+id/btnMyLocation"
         android:layout_width="48dp"
         android:layout_height="48dp"
         android:layout_alignParentEnd="true"
-        android:layout_alignParentTop="true"
-        android:layout_margin="16dp"
-        android:backgroundTint="#455A64"
+        android:layout_above="@id/bottomPanel"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="16dp"
+        android:backgroundTint="#2196F3"
         android:elevation="4dp"
         android:padding="0dp"
-        android:text="🛰️"
+        android:text="📍"
         android:textColor="#FFFFFF"
         android:textSize="20sp" />
-    <!-- ======================================================= -->
-
     <LinearLayout
         android:id="@+id/bottomPanel"
         android:layout_width="match_parent"
@@ -42,5 +48,6 @@
             android:backgroundTint="#4CAF50"
             android:textColor="@android:color/white"
             android:textStyle="bold" />
+
     </LinearLayout>
 </RelativeLayout>

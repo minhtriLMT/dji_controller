@@ -214,19 +214,6 @@
             android:id="@+id/miniMapView"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
-        <Button
-            android:id="@+id/btnToggleSatellite"
-            android:layout_width="38dp"
-            android:layout_height="38dp"
-            android:layout_gravity="top|start"
-            android:layout_margin="6dp"
-            android:backgroundTint="#455A64"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:padding="0dp"
-            android:text="🛰️"
-            android:textColor="#FFFFFF"
-            android:textSize="16sp" />
 
 
         <!-- Tiêu đề phía dưới -->

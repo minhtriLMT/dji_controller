@@ -1,11 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
-
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-
     android:orientation="vertical"
     android:background="#20242A"
     android:padding="8dp">
@@ -21,9 +18,7 @@
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
-
             android:gravity="center_vertical"
-
             android:text="LƯU TRỮ"
             android:textColor="#FFFFFF"
             android:textSize="15sp"
@@ -31,38 +26,40 @@
 
         <Button
             android:id="@+id/btnCloseStorage"
-
             android:layout_width="45dp"
             android:layout_height="34dp"
-
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:padding="0dp"
-
             android:text="X"
             android:textColor="#FFFFFF"
             android:textSize="13sp" />
 
     </LinearLayout>
 
+    <!-- THÔNG SỐ TỐC ĐỘ TẢI (MỚI THÊM) -->
+    <TextView
+        android:id="@+id/tvSpeedStats"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:layout_marginBottom="4dp"
+        android:gravity="center"
+        android:text="DL: 0 KB/s | UL: 0 KB/s"
+        android:textColor="#00FF00"
+        android:textSize="13sp"
+        android:textStyle="bold" />
 
     <!-- DANH SÁCH ẢNH / VIDEO -->
-
     <GridView
         android:id="@+id/gridStorage"
-
         android:layout_width="match_parent"
         android:layout_height="0dp"
-
         android:layout_weight="1"
-
         android:numColumns="3"
-
         android:horizontalSpacing="8dp"
         android:verticalSpacing="8dp"
-
         android:padding="5dp"
-
         android:clipToPadding="false" />
 
 </LinearLayout>
