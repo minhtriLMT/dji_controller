@@ -14,6 +14,11 @@ import org.maplibre.android.style.sources.GeoJsonSource;
 import org.maplibre.geojson.Feature;
 import org.maplibre.geojson.Point;
 
+
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.content.Intent;
 import android.graphics.SurfaceTexture;
 import android.os.Bundle;
@@ -34,22 +39,37 @@ import android.widget.FrameLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
 import androidx.appcompat.app.AppCompatActivity;
 import org.maplibre.android.MapLibre;
 import org.maplibre.android.maps.MapLibreMap;
 import org.maplibre.android.maps.MapView;
 import org.maplibre.android.maps.Style;
 import org.maplibre.android.geometry.LatLng;
+import org.maplibre.android.style.layers.CircleLayer;
+import org.maplibre.android.location.LocationComponent;
+import org.maplibre.android.location.LocationComponentActivationOptions;
+import org.maplibre.android.location.modes.CameraMode;
+import org.maplibre.android.location.modes.RenderMode;
 
 import org.maplibre.geojson.LineString;
 import org.maplibre.android.style.layers.LineLayer;
+import static org.maplibre.android.style.layers.Property.NONE;
+import static org.maplibre.android.style.layers.Property.VISIBLE;
 import static org.maplibre.android.style.layers.PropertyFactory.lineColor;
 import static org.maplibre.android.style.layers.PropertyFactory.lineWidth;
 import static org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap;
 import static org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement;
 import static org.maplibre.android.style.layers.PropertyFactory.iconImage;
 import static org.maplibre.android.style.layers.PropertyFactory.iconSize;
-
+import static org.maplibre.android.style.layers.PropertyFactory.circleColor;
+import static org.maplibre.android.style.layers.PropertyFactory.circleRadius;
+import static org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor;
+import static org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth;
+import static org.maplibre.android.style.layers.PropertyFactory.visibility;
+import org.maplibre.android.location.engine.LocationEngineRequest;
 import com.tri.djicontrol.connection.DJIConnectionManager;
 import com.tri.djicontrol.flight.FlightMissionManager;
 
@@ -125,8 +145,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private MapView miniMapView;
     private MapLibreMap miniMapLibreMap;
     private GeoJsonSource droneSource;
+    private SymbolLayer droneLayer;
     private LatLng lastDroneLocation;
+    private GeoJsonSource phoneLocationSource;
+    private LocationManager locationManager;
 
+    private static final String PHONE_LOCATION_SOURCE_ID = "phone-location-source";
+    private static final String PHONE_LOCATION_LAYER_ID = "phone-location-layer";
+
+    private static final int MINI_MAP_LOCATION_PERMISSION = 2001;
     private GeoJsonSource flightPathSource;
     private final List<Point> flightPathPoints = new ArrayList<>();
     private static final String FLIGHT_PATH_SOURCE_ID = "flight-path-source";
@@ -171,66 +198,112 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         miniMapView.onCreate(savedInstanceState);
 
         miniMapView.getMapAsync(mapLibreMap -> {
+
             miniMapLibreMap = mapLibreMap;
+
             miniMapLibreMap.setStyle(
-                    new Style.Builder().fromUri("asset://osm_style.json"),
+                    new Style.Builder()
+                            .fromUri("asset://osm_style.json"),
+
                     style -> {
-                        LatLng droneLocation = new LatLng(10.82310, 106.62970);
-                        miniMapLibreMap.setCameraPosition(
-                                new org.maplibre.android.camera.CameraPosition.Builder()
-                                        .target(droneLocation)
-                                        .zoom(13.0)
-                                        .build()
+
+                        // VỊ TRÍ ĐIỆN THOẠI THẬT
+                        setupPhoneLocationMarker(style);
+
+
+                        // ICON DRONE
+                        Drawable drawable =
+                                getResources().getDrawable(
+                                        R.drawable.ic_drone_arrow
+                                );
+
+                        Bitmap droneBitmap =
+                                Bitmap.createBitmap(
+                                        drawable.getIntrinsicWidth(),
+                                        drawable.getIntrinsicHeight(),
+                                        Bitmap.Config.ARGB_8888
+                                );
+
+                        Canvas canvas =
+                                new Canvas(droneBitmap);
+
+                        drawable.setBounds(
+                                0,
+                                0,
+                                canvas.getWidth(),
+                                canvas.getHeight()
                         );
 
-                        Drawable drawable = getResources().getDrawable(R.drawable.ic_drone_arrow);
-                        Bitmap droneBitmap = Bitmap.createBitmap(
-                                drawable.getIntrinsicWidth(),
-                                drawable.getIntrinsicHeight(),
-                                Bitmap.Config.ARGB_8888
-                        );
-                        Canvas canvas = new Canvas(droneBitmap);
-                        drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
                         drawable.draw(canvas);
 
-                        style.addImage("drone-icon", droneBitmap);
-
-                        droneSource = new GeoJsonSource(
-                                "drone-source",
-                                Feature.fromGeometry(
-                                        Point.fromLngLat(
-                                                droneLocation.getLongitude(),
-                                                droneLocation.getLatitude()
-                                        )
-                                )
+                        style.addImage(
+                                "drone-icon",
+                                droneBitmap
                         );
+
+
+                        droneSource =
+                                new GeoJsonSource("drone-source");
+
                         style.addSource(droneSource);
 
-                        SymbolLayer droneLayer = new SymbolLayer("drone-layer", "drone-source");
+
+                        droneLayer =
+                                new SymbolLayer(
+                                        "drone-layer",
+                                        "drone-source"
+                                );
+
                         droneLayer.setProperties(
                                 iconImage("drone-icon"),
                                 iconSize(0.7f),
                                 iconAllowOverlap(true),
                                 iconIgnorePlacement(true),
-                                iconRotate(Expression.get("bearing"))
+                                iconRotate(
+                                        Expression.get("bearing")
+                                ),
+                                visibility(NONE)
                         );
+
                         style.addLayer(droneLayer);
 
-                        flightPathSource = new GeoJsonSource(FLIGHT_PATH_SOURCE_ID);
+
+                        // ĐƯỜNG BAY DRONE
+                        flightPathSource =
+                                new GeoJsonSource(
+                                        FLIGHT_PATH_SOURCE_ID
+                                );
+
                         style.addSource(flightPathSource);
 
-                        LineLayer flightPathLayer = new LineLayer(FLIGHT_PATH_LAYER_ID, FLIGHT_PATH_SOURCE_ID);
+                        LineLayer flightPathLayer =
+                                new LineLayer(
+                                        FLIGHT_PATH_LAYER_ID,
+                                        FLIGHT_PATH_SOURCE_ID
+                                );
+
                         flightPathLayer.setProperties(
                                 lineColor("#FFEB3B"),
                                 lineWidth(3.0f)
                         );
+
                         style.addLayer(flightPathLayer);
                     }
             );
 
             miniMapLibreMap.addOnMapClickListener(point -> {
-                Intent intent = new Intent(MainActivity.this, MapActivity.class);
-                startActivityForResult(intent, REQUEST_FIELD_MAP);
+
+                Intent intent =
+                        new Intent(
+                                MainActivity.this,
+                                MapActivity.class
+                        );
+
+                startActivityForResult(
+                        intent,
+                        REQUEST_FIELD_MAP
+                );
+
                 return true;
             });
         });
@@ -313,6 +386,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             runOnUiThread(() -> {
                 tvStatus.setText("Trạng thái: " + status);
                 if (status.contains("Đã kết nối")) {
+                    if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
+                        SymbolLayer layer =
+                                miniMapLibreMap.getStyle().getLayerAs("drone-layer");
+
+                        if (layer != null) {
+                            layer.setProperties(
+                                    visibility(VISIBLE)
+                            );
+                        }
+                    }
                     missionManager = new FlightMissionManager();
                     if (DJISDKManager.getInstance().getProduct() != null) {
                         Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
@@ -363,48 +446,59 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                         double droneLng = state.getAircraftLocation().getLongitude();
 
                                         if (!Double.isNaN(droneLat) && !Double.isNaN(droneLng)) {
-                                            lastDroneLocation = new LatLng(droneLat, droneLng);
-                                            Point currentPoint = Point.fromLngLat(droneLng, droneLat);
 
-                                            if (flightPathPoints.isEmpty()) {
-                                                flightPathPoints.add(currentPoint);
-                                            } else {
-                                                Point lastPoint = flightPathPoints.get(flightPathPoints.size() - 1);
-                                                double distance = calculateHaversineDistance(
-                                                        lastPoint.latitude(),
-                                                        lastPoint.longitude(),
-                                                        droneLat,
-                                                        droneLng
-                                                );
-                                                if (distance >= 2.0) {
-                                                    flightPathPoints.add(currentPoint);
-                                                }
-                                            }
+                                            lastDroneLocation =
+                                                    new LatLng(droneLat, droneLng);
+
+                                            Point currentPoint =
+                                                    Point.fromLngLat(droneLng, droneLat);
 
                                             runOnUiThread(() -> {
-                                                if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
-                                                    GeoJsonSource source = miniMapLibreMap.getStyle().getSourceAs("drone-source");
+
+                                                if (miniMapLibreMap != null
+                                                        && miniMapLibreMap.getStyle() != null) {
+
+                                                    SymbolLayer layer =
+                                                            miniMapLibreMap
+                                                                    .getStyle()
+                                                                    .getLayerAs("drone-layer");
+
+                                                    if (layer != null) {
+                                                        layer.setProperties(
+                                                                visibility(VISIBLE)
+                                                        );
+                                                    }
+
+                                                    GeoJsonSource source =
+                                                            miniMapLibreMap
+                                                                    .getStyle()
+                                                                    .getSourceAs("drone-source");
+
                                                     if (source != null) {
-                                                        double yaw = state.getAttitude().yaw;
-                                                        JsonObject properties = new JsonObject();
-                                                        properties.addProperty("bearing", yaw);
 
-                                                        source.setGeoJson(Feature.fromGeometry(Point.fromLngLat(
-                                                                lastDroneLocation.getLongitude(),
-                                                                lastDroneLocation.getLatitude()
-                                                        ), properties));
-                                                    }
+                                                        double yaw =
+                                                                state.getAttitude().yaw;
+                                                        if (yaw < 0) {
+                                                            yaw += 360;
+                                                        }
+                                                        JsonObject properties =
+                                                                new JsonObject();
 
-                                                    if (flightPathSource != null && flightPathPoints.size() >= 2) {
-                                                        LineString lineString = LineString.fromLngLats(flightPathPoints);
-                                                        flightPathSource.setGeoJson(Feature.fromGeometry(lineString));
+                                                        properties.addProperty(
+                                                                "bearing",
+                                                                yaw
+                                                        );
+
+                                                        source.setGeoJson(
+                                                                Feature.fromGeometry(
+                                                                        Point.fromLngLat(
+                                                                                lastDroneLocation.getLongitude(),
+                                                                                lastDroneLocation.getLatitude()
+                                                                        ),
+                                                                        properties
+                                                                )
+                                                        );
                                                     }
-                                                    miniMapLibreMap.setCameraPosition(
-                                                            new org.maplibre.android.camera.CameraPosition.Builder()
-                                                                    .target(lastDroneLocation)
-                                                                    .zoom(13.0)
-                                                                    .build()
-                                                    );
                                                 }
                                             });
                                         }
@@ -448,6 +542,26 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             });
                         }
                     }
+                } else {
+
+                    // MẤT KẾT NỐI → ẨN ICON DRONE
+
+                    if (miniMapLibreMap != null
+                            && miniMapLibreMap.getStyle() != null) {
+
+                        SymbolLayer layer =
+                                miniMapLibreMap
+                                        .getStyle()
+                                        .getLayerAs("drone-layer");
+
+                        if (layer != null) {
+                            layer.setProperties(
+                                    visibility(NONE)
+                            );
+                        }
+                    }
+
+                    lastDroneLocation = null;
                 }
             });
         });
@@ -1134,6 +1248,162 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         super.onDestroy();
     }
+
+
+    private void setupPhoneLocationMarker(Style style) {
+
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED
+                && ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+        ) != PackageManager.PERMISSION_GRANTED) {
+
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                    },
+                    MINI_MAP_LOCATION_PERMISSION
+            );
+
+            return;
+        }
+
+        LocationComponent locationComponent =
+                miniMapLibreMap.getLocationComponent();
+
+        LocationEngineRequest locationRequest =
+                new LocationEngineRequest.Builder(1000)
+                        .setFastestInterval(500)
+                        .setPriority(
+                                LocationEngineRequest.PRIORITY_HIGH_ACCURACY
+                        )
+                        .build();
+
+        locationComponent.activateLocationComponent(
+                LocationComponentActivationOptions
+                        .builder(this, style)
+                        .useDefaultLocationEngine(true)
+                        .locationEngineRequest(locationRequest)
+                        .build()
+        );
+
+        locationComponent.setLocationComponentEnabled(true);
+
+        locationComponent.setRenderMode(
+                RenderMode.COMPASS
+        );
+
+        locationComponent.setCameraMode(
+                CameraMode.TRACKING
+        );
+
+        // Lấy vị trí điện thoại gần nhất nếu đã có
+        Location lastLocation =
+                locationComponent.getLastKnownLocation();
+
+        if (lastLocation != null) {
+
+            miniMapLibreMap.setCameraPosition(
+                    new org.maplibre.android.camera.CameraPosition.Builder()
+                            .target(
+                                    new LatLng(
+                                            lastLocation.getLatitude(),
+                                            lastLocation.getLongitude()
+                                    )
+                            )
+                            .zoom(18.0)
+                            .build()
+            );
+        }
+    }
+
+
+
+    private void updatePhoneLocationOnMiniMap(
+            double latitude,
+            double longitude
+    ) {
+
+        if (miniMapLibreMap == null) {
+            return;
+        }
+
+        runOnUiThread(() -> {
+
+            if (miniMapLibreMap.getStyle() == null) {
+                return;
+            }
+
+            GeoJsonSource source =
+                    miniMapLibreMap
+                            .getStyle()
+                            .getSourceAs(PHONE_LOCATION_SOURCE_ID);
+
+            if (source != null) {
+
+                source.setGeoJson(
+                        Feature.fromGeometry(
+                                Point.fromLngLat(
+                                        longitude,
+                                        latitude
+                                )
+                        )
+                );
+            }
+        });
+    }
+
+
+
+    @Override
+    public void onRequestPermissionsResult(
+            int requestCode,
+            String[] permissions,
+            int[] grantResults
+    ) {
+        super.onRequestPermissionsResult(
+                requestCode,
+                permissions,
+                grantResults
+        );
+
+        if (requestCode == MINI_MAP_LOCATION_PERMISSION) {
+
+            boolean locationGranted = false;
+
+            for (int result : grantResults) {
+                if (result == PackageManager.PERMISSION_GRANTED) {
+                    locationGranted = true;
+                    break;
+                }
+            }
+
+            if (locationGranted) {
+
+                if (miniMapLibreMap != null
+                        && miniMapLibreMap.getStyle() != null) {
+
+                    setupPhoneLocationMarker(
+                            miniMapLibreMap.getStyle()
+                    );
+                }
+
+            } else {
+
+                Toast.makeText(
+                        MainActivity.this,
+                        "Ứng dụng chưa được cấp quyền vị trí",
+                        Toast.LENGTH_SHORT
+                ).show();
+            }
+        }
+    }
+
 
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {

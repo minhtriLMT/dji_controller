@@ -216,17 +216,7 @@
             android:layout_height="match_parent" />
 
 
-        <!-- Tiêu đề phía dưới -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="24dp"
-            android:layout_gravity="bottom"
-            android:background="#B3000000"
-            android:gravity="center"
-            android:text="Bản đồ hành trình"
-            android:textColor="#FFFFFF"
-            android:textSize="9sp"
-            android:textStyle="bold" />
+
 
     </FrameLayout>
 
