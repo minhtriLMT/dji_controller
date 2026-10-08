@@ -1,26 +1,80 @@
 package com.tri.djicontrol;
 
+import android.annotation.SuppressLint;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import com.tri.djicontrol.firebase.FirebaseHelper;
+
+import com.google.gson.JsonObject;
+import static org.maplibre.android.style.layers.PropertyFactory.iconRotate;
+import org.maplibre.android.style.expressions.Expression;
+
+import org.maplibre.android.style.layers.SymbolLayer;
+import org.maplibre.android.style.sources.GeoJsonSource;
+import org.maplibre.geojson.Feature;
+import org.maplibre.geojson.Point;
+import org.maplibre.geojson.Polygon;
+import org.maplibre.android.style.layers.FillLayer;
+import static org.maplibre.android.style.layers.PropertyFactory.fillColor;
+import static org.maplibre.android.style.layers.PropertyFactory.fillOpacity;
+
+import android.content.Intent;
 import android.graphics.SurfaceTexture;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Environment;
+import android.media.MediaScannerConnection;
+// THÊM IMPORT CHO ÂM THANH
+import android.media.MediaPlayer;
+import android.media.RingtoneManager;
+import android.net.Uri;
+
 import android.view.View;
 import android.view.TextureView;
+import android.view.MotionEvent;
 import android.widget.Button;
-import android.widget.EditText;
+import android.graphics.Color;
+import android.widget.GridView;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
+import android.view.WindowManager;
+import android.app.Dialog;
+import android.widget.FrameLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
+import org.maplibre.android.MapLibre;
+import org.maplibre.android.maps.MapLibreMap;
+import org.maplibre.android.maps.MapView;
+import org.maplibre.android.maps.Style;
+import org.maplibre.android.geometry.LatLng;
+
+import org.maplibre.geojson.LineString;
+import org.maplibre.android.style.layers.LineLayer;
+import static org.maplibre.android.style.layers.PropertyFactory.lineColor;
+import static org.maplibre.android.style.layers.PropertyFactory.lineWidth;
+import static org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap;
+import static org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement;
+import static org.maplibre.android.style.layers.PropertyFactory.iconImage;
+import static org.maplibre.android.style.layers.PropertyFactory.iconSize;
 
 import com.tri.djicontrol.connection.DJIConnectionManager;
-import com.tri.djicontrol.flight.FlightMissionManager;
+import com.tri.djicontrol.WaypointMissionManager.WaypointMissionManager;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
 import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Locale;
 
 import dji.common.camera.SettingsDefinitions;
 import dji.common.error.DJIError;
+import dji.common.model.LocationCoordinate2D;
 import dji.sdk.airlink.AirLink;
 import dji.sdk.battery.Battery;
 import dji.sdk.camera.Camera;
@@ -33,15 +87,27 @@ import dji.sdk.media.DownloadListener;
 import dji.sdk.products.Aircraft;
 import dji.sdk.sdkmanager.DJISDKManager;
 
-public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
-    private TextView tvStatus, tvGpsAndSdStatus, tvTelemetry, tvPhotoCount;
-    private EditText edtAltitude, edtLat, edtLng;
-    private Button btnStart, btnCancel, btnToggleMenu, btnCaptureManual, btnFormatSd, btnToggleCameraMode, btnViewPhotos, btnCameraMenuToggle;
-    private LinearLayout layoutMenuContent, cameraControlPanel;
-    private SeekBar seekBarGimbal;
-    private RadioButton rbPhoto;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import okio.BufferedSink;
 
-    private FlightMissionManager missionManager;
+public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
+    private TextView tvStatus, tvGpsAndSdStatus, tvTelemetry, tvPhotoCount, tvSpeedStats;
+    private Button btnCaptureManual, btnViewPhotos, btnLockRoute , btnVideoPhoto;
+    private FrameLayout cameraModePicker;
+    private TextView tvCameraVideo;
+    private TextView tvCameraPhoto,tvVideoTimer;
+    private float cameraSwipeStartY;
+
+    private LinearLayout cameraControlPanel;
+    private SeekBar seekBarGimbal;
+
     private TextureView videoSurface;
     private DJICodecManager codecManager;
 
@@ -50,76 +116,278 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private int rcSignalPercent = 0;
     private int photoCount = 0;
     private boolean isHomePointSet = false;
-    private boolean isMenuVisible = true;
+
+    private String downloadSpeedText = "DL: 0 KB/s";
+    private String uploadSpeedText = "UL: 0 KB/s";
+
     private boolean isCurrentModePhoto = true;
     private boolean isRecordingVideo = false;
+    private boolean isVideoPaused = false;
+    private boolean wasShootingPhoto = false;
 
+    private long videoStartTime = 0;
+    private long videoPausedTime = 0;
+    private long videoPauseStartTime = 0;
+    private Handler videoTimerHandler = new Handler(Looper.getMainLooper());
+    private Runnable videoTimerRunnable;
+
+    private View miniMap;
+    private MapView miniMapView;
+    private MapLibreMap miniMapLibreMap;
+    private LatLng lastDroneLocation;
+
+    public static final List<Point> sharedFlightPath = new ArrayList<>();
+    public static final List<Point> sharedGridPoints = new ArrayList<>();
+
+    private static final int REQUEST_FIELD_MAP = 1001;
+    private TextView tvFieldArea;
+    private double fieldAreaHa = 0.0;
+    private final List<LatLng> fieldPoints = new ArrayList<>();
+    private Button btnReturnStop;
+
+    private WaypointMissionManager waypointMissionManager;
+
+    @SuppressLint("MissingInflatedId")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        getWindow().setFlags(
+                WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+        );
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        );
+
+        MapLibre.getInstance(this);
         setContentView(R.layout.activity_main);
+
+        waypointMissionManager = new WaypointMissionManager();
+
+        btnReturnStop = findViewById(R.id.btnReturnStop);
+        btnReturnStop.setOnClickListener(v -> {
+            // 1. Huỷ nhiệm vụ bay tự động
+            if(waypointMissionManager != null) {
+                waypointMissionManager.cancelMission(message -> {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+                });
+            }
+
+            // 2. XOÁ SẠCH LỘ TRÌNH VÀ ĐƯỜNG QUÉT TRÊN BẢN ĐỒ
+            fieldPoints.clear();
+            fieldAreaHa = 0.0;
+            if (tvFieldArea != null) {
+                tvFieldArea.setText("0.00 ha");
+            }
+            sharedGridPoints.clear();
+            sharedFlightPath.clear();
+
+            if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
+                GeoJsonSource fieldSource = miniMapLibreMap.getStyle().getSourceAs("field-source");
+                if (fieldSource != null) fieldSource.setGeoJson(Feature.fromGeometry(Polygon.fromLngLats(new ArrayList<>())));
+
+                GeoJsonSource gridSource = miniMapLibreMap.getStyle().getSourceAs("grid-source");
+                if (gridSource != null) gridSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(new ArrayList<>())));
+
+                GeoJsonSource fpSource = miniMapLibreMap.getStyle().getSourceAs("flight-path-source");
+                if (fpSource != null) fpSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(new ArrayList<>())));
+            }
+
+            Toast.makeText(MainActivity.this, "Đã xoá lộ trình và đường quét!", Toast.LENGTH_SHORT).show();
+
+            // 3. Kích hoạt bay về (RTH)
+            if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
+                Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
+                FlightController fc = aircraft.getFlightController();
+
+                if (fc != null) {
+                    Toast.makeText(MainActivity.this, "Đang chuẩn bị RTH...", Toast.LENGTH_SHORT).show();
+
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                        fc.startGoHome(error -> {
+                            runOnUiThread(() -> {
+                                if (error == null) {
+                                    Toast.makeText(MainActivity.this, "ĐÃ KÍCH HOẠT BAY VỀ (RTH)!", Toast.LENGTH_LONG).show();
+                                } else {
+                                    String errText = error.getDescription().toLowerCase();
+                                    if (errText.contains("too close") || errText.contains("distance")) {
+                                        Toast.makeText(MainActivity.this, "Drone đang quá gần Home (<20m), hãy điều khiển bằng tay!", Toast.LENGTH_LONG).show();
+                                    } else {
+                                        Toast.makeText(MainActivity.this, "RTH từ chối: " + error.getDescription(), Toast.LENGTH_LONG).show();
+                                    }
+                                }
+                            });
+                        });
+                    }, 800);
+
+                } else {
+                    Toast.makeText(MainActivity.this, "FlightController chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                Toast.makeText(MainActivity.this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+        miniMap = findViewById(R.id.miniMap);
+        miniMapView = findViewById(R.id.miniMapView);
+        miniMapView.onCreate(savedInstanceState);
+
+        miniMapView.getMapAsync(mapLibreMap -> {
+            miniMapLibreMap = mapLibreMap;
+            miniMapLibreMap.setStyle(
+                    new Style.Builder().fromUri("asset://osm_style.json"),
+                    style -> {
+                        LatLng droneLocation = new LatLng(10.82310, 106.62970);
+                        miniMapLibreMap.setCameraPosition(
+                                new org.maplibre.android.camera.CameraPosition.Builder()
+                                        .target(droneLocation)
+                                        .zoom(13.0)
+                                        .build()
+                        );
+
+                        style.addSource(new GeoJsonSource("field-source"));
+                        FillLayer fieldLayer = new FillLayer("field-layer", "field-source");
+                        fieldLayer.setProperties(fillColor(Color.parseColor("#4D2196F3")));
+                        style.addLayer(fieldLayer);
+
+                        style.addSource(new GeoJsonSource("grid-source"));
+                        LineLayer gridLayer = new LineLayer("grid-layer", "grid-source");
+                        gridLayer.setProperties(lineColor("#FFEB3B"), lineWidth(2.0f));
+                        style.addLayer(gridLayer);
+
+                        style.addSource(new GeoJsonSource("flight-path-source"));
+                        LineLayer flightPathLayer = new LineLayer("flight-path-layer", "flight-path-source");
+                        flightPathLayer.setProperties(lineColor("#F44336"), lineWidth(4.0f));
+                        style.addLayer(flightPathLayer);
+
+                        Drawable drawable = getResources().getDrawable(R.drawable.ic_drone_arrow);
+                        Bitmap droneBitmap = Bitmap.createBitmap(
+                                drawable.getIntrinsicWidth(),
+                                drawable.getIntrinsicHeight(),
+                                Bitmap.Config.ARGB_8888
+                        );
+                        Canvas canvas = new Canvas(droneBitmap);
+                        drawable.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+                        drawable.draw(canvas);
+
+                        style.addImage("drone-icon", droneBitmap);
+
+                        GeoJsonSource droneSource = new GeoJsonSource(
+                                "drone-source",
+                                Feature.fromGeometry(
+                                        Point.fromLngLat(
+                                                droneLocation.getLongitude(),
+                                                droneLocation.getLatitude()
+                                        )
+                                )
+                        );
+                        style.addSource(droneSource);
+
+                        SymbolLayer droneLayer = new SymbolLayer("drone-layer", "drone-source");
+                        droneLayer.setProperties(
+                                iconImage("drone-icon"),
+                                iconSize(0.7f),
+                                iconAllowOverlap(true),
+                                iconIgnorePlacement(true),
+                                iconRotate(Expression.get("bearing"))
+                        );
+                        style.addLayer(droneLayer);
+
+                        updateMiniMapPolygon();
+                    }
+            );
+
+            miniMapLibreMap.addOnMapClickListener(point -> {
+                Intent intent = new Intent(MainActivity.this, MapActivity.class);
+                startActivityForResult(intent, REQUEST_FIELD_MAP);
+                return true;
+            });
+        });
 
         tvStatus = findViewById(R.id.tvStatus);
         tvGpsAndSdStatus = findViewById(R.id.tvGpsAndSdStatus);
         tvTelemetry = findViewById(R.id.tvTelemetry);
         tvPhotoCount = findViewById(R.id.tvPhotoCount);
-        edtAltitude = findViewById(R.id.edtAltitude);
-        edtLat = findViewById(R.id.edtLat);
-        edtLng = findViewById(R.id.edtLng);
-        btnStart = findViewById(R.id.btnStart);
-        btnCancel = findViewById(R.id.btnCancel);
-        btnToggleMenu = findViewById(R.id.btnToggleMenu);
-        btnCaptureManual = findViewById(R.id.btnCaptureManual);
-        btnFormatSd = findViewById(R.id.btnFormatSd);
-        btnToggleCameraMode = findViewById(R.id.btnToggleCameraMode);
-        btnViewPhotos = findViewById(R.id.btnViewPhotos);
-        layoutMenuContent = findViewById(R.id.layoutMenuContent);
-        seekBarGimbal = findViewById(R.id.seekBarGimbal);
-        rbPhoto = findViewById(R.id.rbPhoto);
-        videoSurface = findViewById(R.id.video_preview_texture_view);
+        tvVideoTimer = findViewById(R.id.tvVideoTimer);
+        tvFieldArea = findViewById(R.id.tvFieldArea);
+        tvSpeedStats = findViewById(R.id.tvSpeedStats);
 
-        // Ánh xạ View cho nút bấm và panel camera
-        btnCameraMenuToggle = findViewById(R.id.btnCameraMenuToggle);
+        btnLockRoute = findViewById(R.id.btnLockRoute);
+        btnCaptureManual = findViewById(R.id.btnCaptureManual);
+        btnCaptureManual.setBackgroundTintList(null);
+        btnCaptureManual.setBackgroundResource(R.drawable.bg_camera_shutter);
+        btnViewPhotos = findViewById(R.id.btnViewPhotos);
+        btnVideoPhoto = findViewById(R.id.btnVideoPhoto);
+        btnVideoPhoto.setBackgroundTintList(null);
+        btnVideoPhoto.setBackgroundResource(R.drawable.bg_video_photo);
+        seekBarGimbal = findViewById(R.id.seekBarGimbal);
+
+        videoSurface = findViewById(R.id.video_preview_texture_view);
+        btnLockRoute.setOnClickListener(v -> openWPDialog());
+
         cameraControlPanel = findViewById(R.id.cameraControlPanel);
+        cameraModePicker = findViewById(R.id.cameraModePicker);
+        tvCameraVideo = findViewById(R.id.tvCameraVideo);
+        tvCameraPhoto = findViewById(R.id.tvCameraPhoto);
+        setupCameraModeSwipe();
 
         if (videoSurface != null) {
             videoSurface.setSurfaceTextureListener(this);
         }
 
-        btnFormatSd.setOnClickListener(v -> formatSDCard());
-        btnToggleCameraMode.setOnClickListener(v -> toggleCameraMode());
-        btnViewPhotos.setOnClickListener(v -> fetchAndDownloadLatestPhoto());
-
-        btnToggleMenu.setOnClickListener(v -> {
-            if (isMenuVisible) {
-                layoutMenuContent.setVisibility(View.GONE);
-                btnToggleMenu.setText("MỞ");
+        btnViewPhotos.setOnClickListener(v -> {
+            if (isRecordingVideo) {
+                if (!isVideoPaused) {
+                    isVideoPaused = true;
+                    videoPauseStartTime = System.currentTimeMillis();
+                    btnViewPhotos.setText("▶");
+                    btnViewPhotos.setContentDescription("Tiếp tục quay");
+                    Toast.makeText(MainActivity.this, "Đã tạm dừng quay", Toast.LENGTH_SHORT).show();
+                } else {
+                    isVideoPaused = false;
+                    videoPausedTime += System.currentTimeMillis() - videoPauseStartTime;
+                    btnViewPhotos.setText("Ⅱ");
+                    btnViewPhotos.setContentDescription("Tạm dừng quay");
+                    Toast.makeText(MainActivity.this, "Tiếp tục quay", Toast.LENGTH_SHORT).show();
+                    videoTimerHandler.post(videoTimerRunnable);
+                }
             } else {
-                layoutMenuContent.setVisibility(View.VISIBLE);
-                btnToggleMenu.setText("THU");
+                showStorageDialog();
             }
-            isMenuVisible = !isMenuVisible;
         });
 
-        // Xử lý sự kiện Click cho nút btnCameraMenuToggle để ẩn/hiện cameraControlPanel
-        if (btnCameraMenuToggle != null && cameraControlPanel != null) {
-            btnCameraMenuToggle.setOnClickListener(v -> {
-                if (cameraControlPanel.getVisibility() == View.VISIBLE) {
-                    cameraControlPanel.setVisibility(View.GONE);
-                } else {
-                    cameraControlPanel.setVisibility(View.VISIBLE);
-                }
-            });
-        }
-
         btnCaptureManual.setOnClickListener(v -> triggerManualCapture());
+
+        btnVideoPhoto.setOnClickListener(v -> {
+            if (DJISDKManager.getInstance().getProduct() == null) {
+                Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
+            if (camera == null) return;
+            camera.startShootPhoto(djiError -> {
+                runOnUiThread(() -> {
+                    if (djiError == null) {
+                        photoCount++;
+                        tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
+                        Toast.makeText(MainActivity.this, "Đã chụp ảnh", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Chụp ảnh thất bại: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
+                    }
+                });
+            });
+        });
 
         DJIConnectionManager.getInstance().setConnectionListener(status -> {
             runOnUiThread(() -> {
                 tvStatus.setText("Trạng thái: " + status);
                 if (status.contains("Đã kết nối")) {
-                    missionManager = new FlightMissionManager();
-
                     if (DJISDKManager.getInstance().getProduct() != null) {
                         Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
 
@@ -155,6 +423,59 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                     sdStatusStr = "Thẻ: CHƯA CẮM";
                                 }
                             });
+
+                            camera.setSystemStateCallback(systemState -> {
+                                if (systemState != null) {
+                                    runOnUiThread(() -> {
+                                        SettingsDefinitions.CameraMode currentMode = systemState.getMode();
+                                        if (currentMode == SettingsDefinitions.CameraMode.SHOOT_PHOTO && !isCurrentModePhoto) {
+                                            isCurrentModePhoto = true;
+                                            isRecordingVideo = false;
+                                            updateCameraModeUI(true, true);
+                                            btnVideoPhoto.setVisibility(View.GONE);
+                                            btnCaptureManual.setBackgroundResource(R.drawable.bg_camera_shutter);
+                                            btnCaptureManual.setSelected(false);
+                                            btnCaptureManual.setContentDescription("Chụp ảnh");
+                                        } else if (currentMode == SettingsDefinitions.CameraMode.RECORD_VIDEO && isCurrentModePhoto) {
+                                            isCurrentModePhoto = false;
+                                            updateCameraModeUI(false, true);
+                                            btnVideoPhoto.setVisibility(View.VISIBLE);
+                                            btnCaptureManual.setBackgroundResource(R.drawable.bg_video_record);
+                                            btnCaptureManual.setSelected(false);
+                                            btnCaptureManual.setContentDescription("Quay video");
+                                        }
+
+                                        boolean isRecording = systemState.isRecording();
+                                        if (isRecording && !isRecordingVideo) {
+                                            isRecordingVideo = true;
+                                            isVideoPaused = false;
+                                            startVideoTimer();
+                                            btnViewPhotos.setText("Ⅱ");
+                                            btnCaptureManual.setSelected(true);
+                                        } else if (!isRecording && isRecordingVideo) {
+                                            isRecordingVideo = false;
+                                            isVideoPaused = false;
+                                            stopVideoTimer();
+                                            btnCaptureManual.setSelected(false);
+                                            btnViewPhotos.setText("□");
+                                        }
+
+                                        if (isRecording) {
+                                            int recordingTime = systemState.getCurrentVideoRecordingTimeInSeconds();
+                                            long minutes = recordingTime / 60;
+                                            long seconds = recordingTime % 60;
+                                            tvVideoTimer.setText(String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds));
+                                        }
+
+                                        boolean isShooting = systemState.isShootingSinglePhoto() || systemState.isShootingIntervalPhoto() || systemState.isShootingBurstPhoto();
+                                        if (isShooting && !wasShootingPhoto) {
+                                            photoCount++;
+                                            tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
+                                        }
+                                        wasShootingPhoto = isShooting;
+                                    });
+                                }
+                            });
                         }
 
                         FlightController fc = aircraft.getFlightController();
@@ -164,15 +485,72 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                     int satellites = state.getSatelliteCount();
                                     float currentAlt = state.getAircraftLocation() != null ? state.getAircraftLocation().getAltitude() : 0.0f;
 
+                                    if (state.getAircraftLocation() != null) {
+                                        double droneLat = state.getAircraftLocation().getLatitude();
+                                        double droneLng = state.getAircraftLocation().getLongitude();
+
+                                        if (!Double.isNaN(droneLat) && !Double.isNaN(droneLng)) {
+                                            lastDroneLocation = new LatLng(droneLat, droneLng);
+                                            Point currentPoint = Point.fromLngLat(droneLng, droneLat);
+
+                                            if (sharedFlightPath.isEmpty()) {
+                                                sharedFlightPath.add(currentPoint);
+                                            } else {
+                                                Point lastPoint = sharedFlightPath.get(sharedFlightPath.size() - 1);
+                                                double distance = calculateHaversineDistance(
+                                                        lastPoint.latitude(),
+                                                        lastPoint.longitude(),
+                                                        droneLat,
+                                                        droneLng
+                                                );
+                                                if (distance >= 2.0) {
+                                                    sharedFlightPath.add(currentPoint);
+                                                }
+                                            }
+
+                                            runOnUiThread(() -> {
+                                                if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
+                                                    GeoJsonSource source = miniMapLibreMap.getStyle().getSourceAs("drone-source");
+                                                    if (source != null) {
+                                                        double yaw = state.getAttitude().yaw;
+                                                        JsonObject properties = new JsonObject();
+                                                        properties.addProperty("bearing", yaw);
+
+                                                        source.setGeoJson(Feature.fromGeometry(Point.fromLngLat(
+                                                                lastDroneLocation.getLongitude(),
+                                                                lastDroneLocation.getLatitude()
+                                                        ), properties));
+                                                    }
+
+                                                    if (sharedFlightPath.size() >= 2) {
+                                                        GeoJsonSource fpSource = miniMapLibreMap.getStyle().getSourceAs("flight-path-source");
+                                                        if (fpSource != null) {
+                                                            fpSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(sharedFlightPath)));
+                                                        }
+                                                    }
+                                                    miniMapLibreMap.setCameraPosition(
+                                                            new org.maplibre.android.camera.CameraPosition.Builder()
+                                                                    .target(lastDroneLocation)
+                                                                    .zoom(13.0)
+                                                                    .build()
+                                                    );
+                                                }
+                                            });
+                                        }
+                                    }
                                     float velocityX = state.getVelocityX();
                                     float velocityY = state.getVelocityY();
                                     float speed = (float) Math.sqrt(velocityX * velocityX + velocityY * velocityY);
 
+                                    // ===== THÊM ÂM THANH KHI LƯU HOME POINT =====
                                     if (satellites >= 10 && !isHomePointSet) {
                                         fc.setHomeLocationUsingAircraftCurrentLocation(djiError -> {
                                             if (djiError == null) {
                                                 isHomePointSet = true;
-                                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã lưu Home Point!", Toast.LENGTH_LONG).show());
+                                                runOnUiThread(() -> {
+                                                    Toast.makeText(MainActivity.this, "Đã lưu Home Point!", Toast.LENGTH_LONG).show();
+                                                    playSystemSound(); // Phát âm thanh bíp
+                                                });
                                             }
                                         });
                                     }
@@ -180,13 +558,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                     runOnUiThread(() -> {
                                         double targetLat = 10.82310;
                                         double targetLng = 106.62970;
-                                        try {
-                                            String latStr = edtLat.getText().toString().replace(",", ".");
-                                            String lngStr = edtLng.getText().toString().replace(",", ".");
-                                            targetLat = Double.parseDouble(latStr);
-                                            targetLng = Double.parseDouble(lngStr);
-                                        } catch (Exception ignored) {}
-
                                         double distance = 0.0;
                                         if (state.getAircraftLocation() != null && !Double.isNaN(state.getAircraftLocation().getLatitude())) {
                                             distance = calculateHaversineDistance(
@@ -195,10 +566,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                                     targetLat, targetLng
                                             );
                                         }
-
                                         String homeStatus = isHomePointSet ? "[HOME: OK]" : "[HOME: ĐANG TÌM]";
                                         tvGpsAndSdStatus.setText(String.format("GPS: %d | Pin: %d%% | RC: %d%% | %s %s", satellites, batteryPercent, rcSignalPercent, sdStatusStr, homeStatus));
-                                        tvTelemetry.setText(String.format("Cao: %.1fm | Tốc độ: %.1fm/s\nCách đích: %.1fm", currentAlt, speed, distance));
+
+                                        String speedInfo = String.format("%s | %s", downloadSpeedText, uploadSpeedText);
+                                        if (tvSpeedStats != null) {
+                                            tvSpeedStats.setText(speedInfo);
+                                            tvTelemetry.setText(String.format("Cao: %.1fm | Tốc độ: %.1fm/s\nCách đích: %.1fm", currentAlt, speed, distance));
+                                        } else {
+                                            tvTelemetry.setText(String.format("Cao: %.1fm | Tốc độ: %.1fm/s\nCách đích: %.1fm | %s", currentAlt, speed, distance, speedInfo));
+                                        }
                                     });
                                 }
                             });
@@ -208,31 +585,72 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             });
         });
 
-        // Gọi thẳng đăng ký SDK (đã bỏ phần cấp quyền theo yêu cầu)
         DJIConnectionManager.getInstance().startConnection(this.getApplicationContext());
-
-        btnStart.setOnClickListener(v -> {
-            boolean isRecordMode = !rbPhoto.isChecked();
-            executeMission(isRecordMode);
-        });
-
-        btnCancel.setOnClickListener(v -> {
-            if (missionManager != null) {
-                missionManager.cancelMission();
-                Toast.makeText(this, "ĐÃ HỦY LỆNH BAY!", Toast.LENGTH_SHORT).show();
-            }
-        });
 
         seekBarGimbal.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (missionManager != null && fromUser) {
-                    float angle = progress - 90f;
-                    missionManager.setGimbalAngle(angle);
+                if (fromUser) {
+                    float pitchAngle = -(float) progress;
+
+                    if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
+                        dji.sdk.gimbal.Gimbal gimbal = ((Aircraft) DJISDKManager.getInstance().getProduct()).getGimbal();
+                        if (gimbal != null) {
+                            dji.common.gimbal.Rotation rotation = new dji.common.gimbal.Rotation.Builder()
+                                    .mode(dji.common.gimbal.RotationMode.ABSOLUTE_ANGLE)
+                                    .pitch(pitchAngle)
+                                    .time(0.5)
+                                    .build();
+                            gimbal.rotate(rotation, null);
+                        }
+                    }
                 }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+    }
+
+    // ============================================
+    // HÀM PHÁT ÂM THANH THÔNG BÁO TỪ HỆ THỐNG
+    // ============================================
+    private void playSystemSound() {
+        try {
+            Uri notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+            MediaPlayer mp = MediaPlayer.create(getApplicationContext(), notification);
+            if (mp != null) {
+                mp.setOnCompletionListener(MediaPlayer::release); // Giải phóng bộ nhớ sau khi phát xong
+                mp.start();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void updateMiniMapPolygon() {
+        if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null && fieldPoints.size() == 4) {
+            GeoJsonSource source = miniMapLibreMap.getStyle().getSourceAs("field-source");
+            if (source != null) {
+                List<Point> points = new ArrayList<>();
+                for (LatLng ll : fieldPoints) {
+                    points.add(Point.fromLngLat(ll.getLongitude(), ll.getLatitude()));
+                }
+                points.add(points.get(0));
+                List<List<Point>> rings = new ArrayList<>();
+                rings.add(points);
+                source.setGeoJson(Feature.fromGeometry(Polygon.fromLngLats(rings)));
+            }
+        }
+    }
+
+    private void updateNetworkSpeedUI() {
+        runOnUiThread(() -> {
+            String speedInfo = String.format("%s | %s", downloadSpeedText, uploadSpeedText);
+            if (tvSpeedStats != null) {
+                if(!tvSpeedStats.getText().toString().contains("%")) {
+                    tvSpeedStats.setText(speedInfo);
+                }
+            }
         });
     }
 
@@ -241,7 +659,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
-
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
         if (camera == null) {
             Toast.makeText(this, "Không tìm thấy Camera!", Toast.LENGTH_SHORT).show();
@@ -254,103 +671,344 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 return;
             }
 
-            MediaManager mediaManager = camera.getMediaManager();
-            if (mediaManager == null) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
-                return;
-            }
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                MediaManager mediaManager = camera.getMediaManager();
+                if (mediaManager == null) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
+                    return;
+                }
 
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang làm mới danh sách thẻ nhớ...", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang đồng bộ thẻ nhớ...", Toast.LENGTH_SHORT).show());
 
-            mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, refreshError -> {
-                if (refreshError == null) {
-                    List<MediaFile> fileList = mediaManager.getSDCardFileListSnapshot();
-                    if (fileList != null && !fileList.isEmpty()) {
-                        MediaFile latestMedia = null;
-                        for (int i = fileList.size() - 1; i >= 0; i--) {
-                            if (fileList.get(i).getMediaType() == MediaFile.MediaType.JPEG ||
-                                    fileList.get(i).getMediaType() == MediaFile.MediaType.TIFF) {
-                                latestMedia = fileList.get(i);
-                                break;
+                mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, refreshError -> {
+                    if (refreshError == null) {
+                        List<MediaFile> fileList = mediaManager.getSDCardFileListSnapshot();
+                        if (fileList != null && !fileList.isEmpty()) {
+                            MediaFile latestMedia = null;
+                            for (int i = fileList.size() - 1; i >= 0; i--) {
+                                if (fileList.get(i).getMediaType() == MediaFile.MediaType.JPEG ||
+                                        fileList.get(i).getMediaType() == MediaFile.MediaType.TIFF) {
+                                    latestMedia = fileList.get(i);
+                                    break;
+                                }
                             }
-                        }
 
-                        if (latestMedia != null) {
-                            final MediaFile targetMedia = latestMedia;
-                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang tải ảnh: " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
+                            if (latestMedia != null) {
+                                final MediaFile targetMedia = latestMedia;
+                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Bắt đầu tải ảnh: " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
 
-                            File destDir = new File(getExternalFilesDir(null), "DJI_Captured_Photos");
-                            if (!destDir.exists()) destDir.mkdirs();
-
-                            targetMedia.fetchFileData(destDir, targetMedia.getFileName(), new DownloadListener<String>() {
-                                @Override
-                                public void onStart() {}
-
-                                @Override
-                                public void onRateUpdate(long total, long current, long persize) {}
-
-                                @Override
-                                public void onProgress(long total, long current) {}
-
-                                @Override
-                                public void onSuccess(String filePath) {
-                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã lưu ảnh vào: " + filePath, Toast.LENGTH_LONG).show());
-                                    camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, null);
+                                File destDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "DJI_Photos");
+                                if (!destDir.exists()) {
+                                    destDir.mkdirs();
                                 }
 
-                                @Override
-                                public void onFailure(DJIError error) {
-                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi tải ảnh: " + error.getDescription(), Toast.LENGTH_SHORT).show());
-                                }
+                                targetMedia.fetchFileData(destDir, targetMedia.getFileName(), new DownloadListener<String>() {
+                                    @Override public void onStart() {}
+                                    @Override
+                                    public void onRateUpdate(long total, long current, long persize) {
+                                        double speedKB = persize / 1024.0;
+                                        if (speedKB >= 1024.0) {
+                                            downloadSpeedText = String.format(Locale.US, "DL: %.2f MB/s", speedKB / 1024.0);
+                                        } else {
+                                            downloadSpeedText = String.format(Locale.US, "DL: %.1f KB/s", speedKB);
+                                        }
+                                    }
 
-                                @Override
-                                public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
-                            });
+                                    @Override
+                                    public void onProgress(long total, long current) {
+                                        int percent = (int) (((double) current / total) * 100);
+                                        runOnUiThread(() -> {
+                                            if (tvSpeedStats != null) {
+                                                tvSpeedStats.setText(String.format(Locale.US, "Đang tải: %d%% | %s", percent, downloadSpeedText));
+                                            }
+                                        });
+                                    }
+
+                                    @Override
+                                    public void onSuccess(String filePath) {
+                                        downloadSpeedText = "DL: 0 KB/s";
+                                        updateNetworkSpeedUI();
+
+                                        MediaScannerConnection.scanFile(MainActivity.this,
+                                                new String[]{filePath},
+                                                new String[]{"image/jpeg", "image/tiff", "video/mp4"},
+                                                (path, uri) -> {});
+
+                                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã lưu vào Album điện thoại!", Toast.LENGTH_LONG).show());
+                                        camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, null);
+
+                                        File downloadedFile = new File(filePath);
+
+                                        FirebaseHelper.uploadImageToFirebase(downloadedFile, new FirebaseHelper.UploadCallback() {
+                                            @Override
+                                            public void onProgress(int progress, double speedKBps) {
+                                                if (speedKBps >= 1024.0) {
+                                                    uploadSpeedText = String.format(Locale.US, "UL: %.2f MB/s", speedKBps / 1024.0);
+                                                } else {
+                                                    uploadSpeedText = String.format(Locale.US, "UL: %.1f KB/s", speedKBps);
+                                                }
+                                                updateNetworkSpeedUI();
+                                            }
+
+                                            @Override
+                                            public void onSuccess(String downloadUrl) {
+                                                uploadSpeedText = "UL: 0 KB/s";
+                                                updateNetworkSpeedUI();
+                                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã đẩy ảnh lên Firebase thành công!", Toast.LENGTH_SHORT).show());
+                                                // Bạn có thể lưu downloadUrl này vào Firebase Realtime Database / Firestore ở đây nếu cần
+                                            }
+
+                                            @Override
+                                            public void onFailure(String error) {
+                                                uploadSpeedText = "UL: 0 KB/s";
+                                                updateNetworkSpeedUI();
+                                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi đẩy ảnh Firebase: " + error, Toast.LENGTH_LONG).show());
+                                            }
+                                        });
+                                    }
+
+                                    @Override
+                                    public void onFailure(DJIError error) {
+                                        downloadSpeedText = "DL: 0 KB/s";
+                                        updateNetworkSpeedUI();
+                                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi tải ảnh: " + error.getDescription(), Toast.LENGTH_SHORT).show());
+                                    }
+
+                                    @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
+                                });
+                            } else {
+                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không tìm thấy file ảnh nào trên thẻ nhớ!", Toast.LENGTH_SHORT).show());
+                            }
                         } else {
-                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không tìm thấy file ảnh nào trên thẻ nhớ!", Toast.LENGTH_SHORT).show());
+                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Thẻ nhớ trống!", Toast.LENGTH_SHORT).show());
                         }
                     } else {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Thẻ nhớ trống!", Toast.LENGTH_SHORT).show());
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không thể làm mới thẻ nhớ: " + refreshError.getDescription(), Toast.LENGTH_SHORT).show());
                     }
-                } else {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không thể làm mới thẻ nhớ: " + refreshError.getDescription(), Toast.LENGTH_SHORT).show());
-                }
-            });
+                });
+            }, 500);
         });
     }
 
-    private void toggleCameraMode() {
+    public void uploadPhotoToServer(File file, String serverUrl) {
+        if (file == null || !file.exists()) return;
+
+        OkHttpClient client = new OkHttpClient();
+
+        ProgressRequestBody fileBody = new ProgressRequestBody(file, "image/jpeg", (bytesWritten, contentLength, speedKBps) -> {
+            if (speedKBps >= 1024.0) {
+                uploadSpeedText = String.format(Locale.US, "UL: %.2f MB/s", speedKBps / 1024.0);
+            } else {
+                uploadSpeedText = String.format(Locale.US, "UL: %.1f KB/s", speedKBps);
+            }
+            updateNetworkSpeedUI();
+        });
+
+        RequestBody requestBody = new MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("file", file.getName(), fileBody)
+                .build();
+
+        Request request = new Request.Builder()
+                .url(serverUrl)
+                .post(requestBody)
+                .build();
+
+        client.newCall(request).enqueue(new Callback() {
+            @Override
+            public void onFailure(Call call, IOException e) {
+                uploadSpeedText = "UL: 0 KB/s";
+                updateNetworkSpeedUI();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Upload thất bại: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+
+            @Override
+            public void onResponse(Call call, Response response) throws IOException {
+                uploadSpeedText = "UL: 0 KB/s";
+                updateNetworkSpeedUI();
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã upload ảnh lên Server thành công!", Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    public static class ProgressRequestBody extends RequestBody {
+        private final File file;
+        private final String contentType;
+        private final UploadProgressListener listener;
+
+        public interface UploadProgressListener {
+            void onProgress(long bytesWritten, long contentLength, double speedKBps);
+        }
+
+        public ProgressRequestBody(File file, String contentType, UploadProgressListener listener) {
+            this.file = file;
+            this.contentType = contentType;
+            this.listener = listener;
+        }
+
+        @Override public MediaType contentType() { return MediaType.parse(contentType); }
+        @Override public long contentLength() { return file.length(); }
+
+        @Override
+        public void writeTo(BufferedSink sink) throws IOException {
+            long fileLength = contentLength();
+            byte[] buffer = new byte[4096];
+            long uploaded = 0;
+            long lastTime = System.currentTimeMillis();
+            long lastUploaded = 0;
+
+            try (FileInputStream in = new FileInputStream(file)) {
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    uploaded += read;
+                    sink.write(buffer, 0, read);
+
+                    long currentTime = System.currentTimeMillis();
+                    long timeDiff = currentTime - lastTime;
+                    if (timeDiff >= 400) {
+                        double speedKBps = ((uploaded - lastUploaded) / 1024.0) / (timeDiff / 1000.0);
+                        if (listener != null) {
+                            listener.onProgress(uploaded, fileLength, speedKBps);
+                        }
+                        lastTime = currentTime;
+                        lastUploaded = uploaded;
+                    }
+                }
+            }
+        }
+    }
+
+    private void setupCameraModeSwipe() {
+        updateCameraModeUI(true, false);
+        cameraModePicker.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    cameraSwipeStartY = event.getY();
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    float endY = event.getY();
+                    float diffY = endY - cameraSwipeStartY;
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                    if (diffY < -20) {
+                        selectCameraMode(true);
+                    } else if (diffY > 20) {
+                        selectCameraMode(false);
+                    }
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                    return true;
+            }
+            return true;
+        });
+    }
+
+    private void selectCameraMode(boolean photo) {
+        if (photo) {
+            updateCameraModeUI(true, true);
+            setCameraPhotoMode();
+            btnVideoPhoto.setVisibility(View.GONE);
+            btnCaptureManual.setBackgroundResource(R.drawable.bg_camera_shutter);
+            btnCaptureManual.setSelected(false);
+            btnCaptureManual.setContentDescription("Chụp ảnh");
+        } else {
+            updateCameraModeUI(false, true);
+            setCameraVideoMode();
+            btnVideoPhoto.setVisibility(View.VISIBLE);
+            btnCaptureManual.setBackgroundResource(R.drawable.bg_video_record);
+            btnCaptureManual.setSelected(false);
+            btnCaptureManual.setContentDescription("Quay video");
+        }
+    }
+
+    private void updateCameraModeUI(boolean photo, boolean animate) {
+        TextView selected;
+        TextView unselected;
+
+        if (photo) {
+            selected = tvCameraPhoto;
+            unselected = tvCameraVideo;
+        } else {
+            selected = tvCameraVideo;
+            unselected = tvCameraPhoto;
+        }
+
+        selected.setTextColor(Color.YELLOW);
+        selected.setTextSize(20);
+        selected.setTypeface(null, Typeface.BOLD);
+        selected.setAlpha(1.0f);
+
+        unselected.setTextColor(Color.WHITE);
+        unselected.setTextSize(16);
+        unselected.setTypeface(null, Typeface.NORMAL);
+        unselected.setAlpha(0.6f);
+
+        if (animate) {
+            if (photo) {
+                tvCameraPhoto.animate().translationY(0).scaleX(1.0f).scaleY(1.0f).setDuration(180).start();
+                tvCameraVideo.animate().translationY(-42).scaleX(0.9f).scaleY(0.9f).setDuration(180).start();
+            } else {
+                tvCameraVideo.animate().translationY(0).scaleX(1.0f).scaleY(1.0f).setDuration(180).start();
+                tvCameraPhoto.animate().translationY(42).scaleX(0.9f).scaleY(0.9f).setDuration(180).start();
+            }
+        } else {
+            if (photo) {
+                tvCameraPhoto.setTranslationY(0);
+                tvCameraPhoto.setScaleX(1.0f);
+                tvCameraPhoto.setScaleY(1.0f);
+                tvCameraVideo.setTranslationY(-42);
+                tvCameraVideo.setScaleX(0.9f);
+                tvCameraVideo.setScaleY(0.9f);
+            } else {
+                tvCameraVideo.setTranslationY(0);
+                tvCameraVideo.setScaleX(1.0f);
+                tvCameraVideo.setScaleY(1.0f);
+                tvCameraPhoto.setTranslationY(42);
+                tvCameraPhoto.setScaleX(0.9f);
+                tvCameraPhoto.setScaleY(0.9f);
+            }
+        }
+    }
+
+    private void setCameraPhotoMode() {
         if (DJISDKManager.getInstance().getProduct() == null) {
             Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
-        if (camera != null) {
-            SettingsDefinitions.CameraMode targetMode = isCurrentModePhoto ?
-                    SettingsDefinitions.CameraMode.RECORD_VIDEO :
-                    SettingsDefinitions.CameraMode.SHOOT_PHOTO;
-
-            camera.setMode(targetMode, djiError -> {
-                runOnUiThread(() -> {
-                    if (djiError == null) {
-                        isCurrentModePhoto = !isCurrentModePhoto;
-                        btnToggleCameraMode.setText(isCurrentModePhoto ? "PHOTO" : "VIDEO");
-
-                        if (isCurrentModePhoto) {
-                            btnCaptureManual.setText("CHỤP");
-                            btnCaptureManual.setBackgroundTintList(android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#03A9F4")));
-                        } else {
-                            btnCaptureManual.setText("QUAY");
-                            btnCaptureManual.setBackgroundTintList(android.content.res.ColorStateList.valueOf(android.graphics.Color.parseColor("#E91E63")));
-                        }
-
-                        Toast.makeText(MainActivity.this, isCurrentModePhoto ? "Chế độ: CHỤP ẢNH" : "Chế độ: QUAY VIDEO", Toast.LENGTH_SHORT).show();
-                    } else {
-                        Toast.makeText(MainActivity.this, "Không đổi được chế độ: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
-                    }
-                });
+        if (camera == null) return;
+        camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, djiError -> {
+            runOnUiThread(() -> {
+                if (djiError == null) {
+                    isCurrentModePhoto = true;
+                    isRecordingVideo = false;
+                    updateCameraModeUI(true, true);
+                } else {
+                    Toast.makeText(MainActivity.this, "Không chuyển được sang chế độ ảnh: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
+                }
             });
+        });
+    }
+
+    private void setCameraVideoMode() {
+        if (DJISDKManager.getInstance().getProduct() == null) {
+            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            return;
         }
+        Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
+        if (camera == null) return;
+        camera.setMode(SettingsDefinitions.CameraMode.RECORD_VIDEO, djiError -> {
+            runOnUiThread(() -> {
+                if (djiError == null) {
+                    isCurrentModePhoto = false;
+                    isRecordingVideo = false;
+                    updateCameraModeUI(false, true);
+                } else {
+                    Toast.makeText(MainActivity.this, "Không chuyển được sang chế độ quay: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
+                }
+            });
+        });
     }
 
     private void formatSDCard() {
@@ -361,7 +1019,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
         if (camera != null) {
             Toast.makeText(this, "Đang tiến hành Format thẻ...", Toast.LENGTH_SHORT).show();
-
             camera.formatStorage(SettingsDefinitions.StorageLocation.SDCARD, djiError -> {
                 runOnUiThread(() -> {
                     if (djiError == null) {
@@ -376,90 +1033,99 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
     }
 
-    // Hàm triggerManualCapture đã được bổ sung đầy đủ thông báo lỗi cho Quay và Dừng quay
     private void triggerManualCapture() {
         if (DJISDKManager.getInstance().getProduct() == null) {
             Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
-
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
-        if (camera != null) {
-            if (isCurrentModePhoto) {
-                // Đang ở chế độ CHỤP ẢNH
-                camera.startShootPhoto(djiError -> {
-                    if (djiError == null) {
-                        photoCount++;
-                        runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
-                            tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
-                        });
-                    } else {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chụp: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
-                    }
-                });
-            } else {
-                // Đang ở chế độ QUAY VIDEO
-                if (!isRecordingVideo) {
-                    camera.startRecordVideo(djiError -> {
-                        if (djiError == null) {
-                            isRecordingVideo = true;
-                            runOnUiThread(() -> {
-                                btnCaptureManual.setText("DỪNG");
-                                Toast.makeText(MainActivity.this, "Bắt đầu quay Video!", Toast.LENGTH_SHORT).show();
-                            });
-                        } else {
-                            // Đã bổ sung báo lỗi khi không thể bắt đầu quay
-                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
-                        }
+        if (camera == null) return;
+
+        if (isCurrentModePhoto) {
+            camera.startShootPhoto(djiError -> {
+                if (djiError == null) {
+                    photoCount++;
+                    runOnUiThread(() -> {
+                        Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
+                        tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
                     });
                 } else {
-                    camera.stopRecordVideo(djiError -> {
-                        if (djiError == null) {
-                            isRecordingVideo = false;
-                            runOnUiThread(() -> {
-                                btnCaptureManual.setText("QUAY");
-                                Toast.makeText(MainActivity.this, "Đã lưu Video vào thẻ nhớ!", Toast.LENGTH_SHORT).show();
-                            });
-                        } else {
-                            // Đã bổ sung báo lỗi khi không thể dừng quay
-                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi dừng quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
-                        }
-                    });
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chụp: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
                 }
-            }
+            });
+            return;
+        }
+
+        if (!isRecordingVideo) {
+            camera.startRecordVideo(djiError -> {
+                runOnUiThread(() -> {
+                    if (djiError == null) {
+                        isRecordingVideo = true;
+                        isVideoPaused = false;
+                        startVideoTimer();
+                        btnViewPhotos.setText("Ⅱ");
+                        btnViewPhotos.setContentDescription("Tạm dừng quay");
+                        btnCaptureManual.setSelected(true);
+                        btnCaptureManual.setContentDescription("Dừng quay");
+                        Toast.makeText(MainActivity.this, "Bắt đầu quay Video!", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Lỗi quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                    }
+                });
+            });
+        } else {
+            camera.stopRecordVideo(djiError -> {
+                runOnUiThread(() -> {
+                    if (djiError == null) {
+                        isRecordingVideo = false;
+                        isVideoPaused = false;
+                        stopVideoTimer();
+                        btnCaptureManual.setSelected(false);
+                        btnCaptureManual.setContentDescription("Quay video");
+                        btnViewPhotos.setText("□");
+                        btnViewPhotos.setContentDescription("Mở kho lưu trữ");
+                        Toast.makeText(MainActivity.this, "Đã lưu Video vào thẻ nhớ!", Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Lỗi dừng quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                    }
+                });
+            });
         }
     }
 
-    private void executeMission(boolean isRecord) {
-        if (missionManager == null) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
-            return;
+    private void startVideoTimer() {
+        if(isRecordingVideo) return;
+        videoStartTime = System.currentTimeMillis();
+        videoPausedTime = 0;
+        videoPauseStartTime = 0;
+        tvVideoTimer.setText("00:00");
+        tvVideoTimer.setVisibility(View.VISIBLE);
+        videoTimerRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (isRecordingVideo && !isVideoPaused) {
+                    long elapsed = System.currentTimeMillis() - videoStartTime - videoPausedTime;
+                    long totalSeconds = elapsed / 1000;
+                    long minutes = totalSeconds / 60;
+                    long seconds = totalSeconds % 60;
+                    String time = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds);
+                    tvVideoTimer.setText(time);
+                    videoTimerHandler.postDelayed(this, 1000);
+                }
+            }
+        };
+        videoTimerHandler.post(videoTimerRunnable);
+    }
+
+    private void stopVideoTimer() {
+        if (videoTimerRunnable != null) {
+            videoTimerHandler.removeCallbacks(videoTimerRunnable);
         }
-        if (!isHomePointSet) {
-            Toast.makeText(this, "Chưa lưu Home Point, chờ đủ vệ tinh GPS (>10)!", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        double targetLat;
-        double targetLng;
-        float targetAlt;
-
-        try {
-            String latStr = edtLat.getText().toString().replace(",", ".");
-            String lngStr = edtLng.getText().toString().replace(",", ".");
-            String altStr = edtAltitude.getText().toString().replace(",", ".");
-
-            targetLat = Double.parseDouble(latStr);
-            targetLng = Double.parseDouble(lngStr);
-            targetAlt = Float.parseFloat(altStr);
-        } catch (Exception e) {
-            Toast.makeText(this, "Lỗi định dạng tọa độ! Hãy kiểm tra lại số liệu.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        Toast.makeText(this, "Đã nhấn START! Bắt đầu bay lịch trình...", Toast.LENGTH_SHORT).show();
-        missionManager.flyToTargetAndExecute(targetLat, targetLng, targetAlt, isRecord);
+        tvVideoTimer.setText("00:00");
+        tvVideoTimer.setVisibility(View.GONE);
+        videoStartTime = 0;
+        videoPausedTime = 0;
+        videoPauseStartTime = 0;
     }
 
     private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
@@ -472,9 +1138,246 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))) * 1000;
     }
 
+    private List<LocationCoordinate2D> generateGrid(List<LatLng> polygon, double spacingMeters) {
+        List<LocationCoordinate2D> waypoints = new ArrayList<>();
+        if (polygon == null || polygon.size() < 3) return waypoints;
+
+        double minLat = polygon.get(0).getLatitude();
+        double maxLat = minLat;
+        for (LatLng p : polygon) {
+            double currentLat = p.getLatitude();
+            if (currentLat < minLat) minLat = currentLat;
+            if (currentLat > maxLat) maxLat = currentLat;
+        }
+
+        double stepLat = spacingMeters / 111320.0;
+        boolean leftToRight = true;
+        int polySize = polygon.size();
+
+        for (double lat = minLat; lat <= maxLat; lat += stepLat) {
+            List<Double> intersectLngs = new ArrayList<>();
+
+            for (int i = 0; i < polySize; i++) {
+                LatLng p1 = polygon.get(i);
+                LatLng p2 = polygon.get((i + 1) % polySize);
+
+                double lat1 = p1.getLatitude();
+                double lat2 = p2.getLatitude();
+
+                if ((lat1 <= lat && lat2 > lat) || (lat2 <= lat && lat1 > lat)) {
+                    double fraction = (lat - lat1) / (lat2 - lat1);
+                    double lng = p1.getLongitude() + fraction * (p2.getLongitude() - p1.getLongitude());
+                    intersectLngs.add(lng);
+                }
+            }
+
+            if (intersectLngs.size() >= 2) {
+                Collections.sort(intersectLngs);
+                double firstLng = intersectLngs.get(0);
+                double lastLng = intersectLngs.get(intersectLngs.size() - 1);
+
+                if (leftToRight) {
+                    waypoints.add(new LocationCoordinate2D(lat, firstLng));
+                    waypoints.add(new LocationCoordinate2D(lat, lastLng));
+                } else {
+                    waypoints.add(new LocationCoordinate2D(lat, lastLng));
+                    waypoints.add(new LocationCoordinate2D(lat, firstLng));
+                }
+                leftToRight = !leftToRight;
+            }
+        }
+        return waypoints;
+    }
+
+    private void openWPDialog() {
+        Dialog dialog = new Dialog(MainActivity.this);
+        dialog.setContentView(R.layout.dialog_wp);
+
+        Button btnCloseWP = dialog.findViewById(R.id.btnCloseWP);
+        Button btnEditWPField = dialog.findViewById(R.id.btnEditWPField);
+        TextView tvWPFieldStatus = dialog.findViewById(R.id.tvWPFieldStatus);
+        TextView tvWPFieldArea = dialog.findViewById(R.id.tvWPFieldArea);
+        Button btnStartMapping = dialog.findViewById(R.id.btnStartMapping);
+
+        android.widget.EditText edtWPAltitude = dialog.findViewById(R.id.edtWPAltitude);
+        android.widget.EditText edtWPLineSpacing = dialog.findViewById(R.id.edtWPLineSpacing);
+
+        if (fieldPoints.size() == 4) {
+            tvWPFieldStatus.setText("Đã xác định khu vực");
+            tvWPFieldArea.setText(String.format(Locale.US, "Diện tích: %.2f ha", fieldAreaHa));
+            if(btnStartMapping != null) btnStartMapping.setVisibility(View.VISIBLE);
+        } else {
+            tvWPFieldStatus.setText("Chưa xác định khu vực");
+            tvWPFieldArea.setText("Diện tích: 0.00 ha");
+            if(btnStartMapping != null) btnStartMapping.setVisibility(View.GONE);
+        }
+
+        if(btnStartMapping != null) {
+            btnStartMapping.setOnClickListener(view -> {
+                // THÊM TIẾNG BÍP
+                playSystemSound();
+
+                if (fieldPoints.size() == 4) {
+                    final float targetAltitude; // final để dùng trong callback
+                    final double pathSpacing;
+
+                    try {
+                        float alt = 10.0f;
+                        double space = 5.0;
+                        if (edtWPAltitude != null && !edtWPAltitude.getText().toString().isEmpty()) {
+                            alt = Float.parseFloat(edtWPAltitude.getText().toString());
+                        }
+                        if (edtWPLineSpacing != null && !edtWPLineSpacing.getText().toString().isEmpty()) {
+                            space = Double.parseDouble(edtWPLineSpacing.getText().toString());
+                        }
+                        targetAltitude = alt;
+                        pathSpacing = space;
+                    } catch (NumberFormatException e) {
+                        Toast.makeText(MainActivity.this, "Vui lòng nhập thông số hợp lệ!", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+
+                    // 1. Tạo điểm lưới quét
+                    final List<LocationCoordinate2D> gridWaypoints = generateGrid(fieldPoints, pathSpacing);
+
+                    if (!gridWaypoints.isEmpty()) {
+                        // 2. Chỉ hiển thị (VẼ LÊN BẢN ĐỒ TRƯỚC), CHƯA BAY NGAY
+                        sharedGridPoints.clear();
+                        sharedFlightPath.clear();
+                        for (LocationCoordinate2D wp : gridWaypoints) {
+                            sharedGridPoints.add(Point.fromLngLat(wp.getLongitude(), wp.getLatitude()));
+                        }
+
+                        if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
+                            GeoJsonSource gridSource = miniMapLibreMap.getStyle().getSourceAs("grid-source");
+                            if (gridSource != null) {
+                                gridSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(sharedGridPoints)));
+                            }
+                        }
+
+                        // 3. TẠO HỘP THOẠI HỎI XÁC NHẬN TRƯỚC KHI BAY
+                        new android.app.AlertDialog.Builder(MainActivity.this)
+                                .setTitle("XÁC NHẬN LỘ TRÌNH BAY")
+                                .setMessage("Đã tính toán xong lộ trình.\n" +
+                                        "- Tổng số điểm: " + gridWaypoints.size() + " điểm\n" +
+                                        "- Độ cao: " + targetAltitude + " mét\n\n" +
+                                        "Bạn có chắc chắn muốn Drone BẮT ĐẦU BAY quét tự động không?")
+                                .setPositiveButton("XÁC NHẬN BAY", (dialogInterface, i) -> {
+                                    // NGƯỜI DÙNG BẤM "XÁC NHẬN" -> LÚC NÀY MỚI GỬI LỆNH LÊN DRONE
+
+                                    if(waypointMissionManager != null) {
+                                        waypointMissionManager.startMission(gridWaypoints, targetAltitude, message -> {
+                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show());
+                                        });
+                                    }
+
+                                    // Chỉnh Gimbal xoay xuống -90 độ để chụp vuông góc
+                                    if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
+                                        dji.sdk.gimbal.Gimbal gimbal = ((Aircraft) DJISDKManager.getInstance().getProduct()).getGimbal();
+                                        if (gimbal != null) {
+                                            dji.common.gimbal.Rotation rotation = new dji.common.gimbal.Rotation.Builder()
+                                                    .mode(dji.common.gimbal.RotationMode.ABSOLUTE_ANGLE)
+                                                    .pitch(-90f)
+                                                    .time(2.0)
+                                                    .build();
+                                            gimbal.rotate(rotation, null);
+                                        }
+                                    }
+
+                                    Toast.makeText(MainActivity.this, "ĐÃ GỬI LỆNH BAY VỚI " + gridWaypoints.size() + " ĐIỂM!", Toast.LENGTH_SHORT).show();
+                                    dialog.dismiss(); // Tắt hộp thoại cài đặt WPDialog gốc
+                                })
+                                .setNegativeButton("CHƯA BAY", (dialogInterface, i) -> {
+                                    // Bấm Chưa Bay -> Đóng hộp thoại xác nhận, vẫn giữ nguyên Dialog thông số
+                                    dialogInterface.dismiss();
+                                })
+                                .show();
+
+                    } else {
+                        Toast.makeText(MainActivity.this, "Khu vực quá hẹp hoặc sai thông số lưới!", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    Toast.makeText(MainActivity.this, "Vui lòng khoanh đủ 4 góc khu vực quét!", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        btnCloseWP.setOnClickListener(view -> dialog.dismiss());
+
+        btnEditWPField.setOnClickListener(view -> {
+            Intent intent = new Intent(MainActivity.this, MapActivity.class);
+            intent.putExtra("EDIT_FIELD", true);
+            if (fieldPoints.size() == 4) {
+                double[] latitudes = new double[fieldPoints.size()];
+                double[] longitudes = new double[fieldPoints.size()];
+                for (int i = 0; i < fieldPoints.size(); i++) {
+                    latitudes[i] = fieldPoints.get(i).getLatitude();
+                    longitudes[i] = fieldPoints.get(i).getLongitude();
+                }
+                intent.putExtra("FIELD_LATITUDES", latitudes);
+                intent.putExtra("FIELD_LONGITUDES", longitudes);
+            }
+            dialog.dismiss();
+            startActivityForResult(intent, REQUEST_FIELD_MAP);
+        });
+
+        dialog.show();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.80),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.85)
+            );
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (miniMapView != null) miniMapView.onStart();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_FIELD_MAP && resultCode == RESULT_OK && data != null) {
+            double areaHa = data.getDoubleExtra("FIELD_AREA_HA", 0.0);
+            double[] latitudes = data.getDoubleArrayExtra("FIELD_LATITUDES");
+            double[] longitudes = data.getDoubleArrayExtra("FIELD_LONGITUDES");
+
+            fieldPoints.clear();
+            if (latitudes != null && longitudes != null && latitudes.length == longitudes.length) {
+                for (int i = 0; i < latitudes.length; i++) {
+                    fieldPoints.add(new LatLng(latitudes[i], longitudes[i]));
+                }
+            }
+
+            fieldAreaHa = areaHa;
+            if (tvFieldArea != null) {
+                tvFieldArea.setText(String.format(Locale.US, "%.2f ha", fieldAreaHa));
+            }
+
+            updateMiniMapPolygon();
+            openWPDialog();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (miniMapView != null) miniMapView.onPause();
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        if (miniMapView != null) miniMapView.onStop();
+        super.onStop();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
+        if (miniMapView != null) miniMapView.onResume();
         if (videoSurface != null && videoSurface.isAvailable()) {
             if (codecManager == null) {
                 codecManager = new DJICodecManager(this, videoSurface.getSurfaceTexture(), videoSurface.getWidth(), videoSurface.getHeight());
@@ -484,26 +1387,23 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     @Override
     protected void onDestroy() {
-        super.onDestroy();
-        if (missionManager != null) {
-            missionManager.cancelMission();
+        if (miniMapView != null) miniMapView.onDestroy();
+        if(waypointMissionManager != null) {
+            waypointMissionManager.cancelMission(null);
         }
         if (codecManager != null) {
             codecManager.cleanSurface();
             codecManager = null;
         }
+        super.onDestroy();
     }
 
     @Override
     public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-        if (codecManager == null) {
-            codecManager = new DJICodecManager(this, surface, width, height);
-        }
+        if (codecManager == null) codecManager = new DJICodecManager(this, surface, width, height);
         if (VideoFeeder.getInstance() != null) {
             VideoFeeder.VideoFeed feed = VideoFeeder.getInstance().getPrimaryVideoFeed();
-            if (feed != null) {
-                feed.addVideoDataListener(receivedVideoDataListener);
-            }
+            if (feed != null) feed.addVideoDataListener(receivedVideoDataListener);
         }
     }
 
@@ -519,9 +1419,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
         if (VideoFeeder.getInstance() != null) {
             VideoFeeder.VideoFeed feed = VideoFeeder.getInstance().getPrimaryVideoFeed();
-            if (feed != null) {
-                feed.removeVideoDataListener(receivedVideoDataListener);
-            }
+            if (feed != null) feed.removeVideoDataListener(receivedVideoDataListener);
         }
         if (codecManager != null) {
             codecManager.cleanSurface();
@@ -534,8 +1432,91 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     public void onSurfaceTextureUpdated(SurfaceTexture surface) {}
 
     private final VideoFeeder.VideoDataListener receivedVideoDataListener = (videoBuffer, size) -> {
-        if (codecManager != null) {
-            codecManager.sendDataToDecoder(videoBuffer, size);
-        }
+        if (codecManager != null) codecManager.sendDataToDecoder(videoBuffer, size);
     };
+
+    private void showStorageDialog() {
+        Dialog dialog = new Dialog(this);
+        dialog.setContentView(R.layout.dialog_storage);
+
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().setLayout(
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.70),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.80)
+            );
+        }
+
+        GridView gridStorage = dialog.findViewById(R.id.gridStorage);
+        Button btnCloseStorage = dialog.findViewById(R.id.btnCloseStorage);
+        tvSpeedStats = dialog.findViewById(R.id.tvSpeedStats);
+        List<MediaFile> storageFiles = new ArrayList<>();
+        StorageAdapter adapter = new StorageAdapter(MainActivity.this, storageFiles);
+        gridStorage.setAdapter(adapter);
+
+        btnCloseStorage.setOnClickListener(v -> {
+            if (DJISDKManager.getInstance().getProduct() != null) {
+                Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
+                if (camera != null) {
+                    SettingsDefinitions.CameraMode mode;
+                    if (isCurrentModePhoto) mode = SettingsDefinitions.CameraMode.SHOOT_PHOTO;
+                    else mode = SettingsDefinitions.CameraMode.RECORD_VIDEO;
+                    camera.setMode(mode, null);
+                }
+            }
+            tvSpeedStats = null;
+            dialog.dismiss();
+        });
+
+        dialog.show();
+
+        if (DJISDKManager.getInstance().getProduct() == null) {
+            Toast.makeText(MainActivity.this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
+        if (camera == null) {
+            Toast.makeText(MainActivity.this, "Không tìm thấy Camera!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        camera.setMode(SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD, djiError -> {
+            if (djiError != null && !djiError.getDescription().toLowerCase().contains("not supported")) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi mở bộ nhớ: " + djiError.getDescription(), Toast.LENGTH_SHORT).show());
+                return;
+            }
+
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                MediaManager mediaManager = camera.getMediaManager();
+                if (mediaManager == null) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
+                    return;
+                }
+
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang tải danh sách ảnh/video...", Toast.LENGTH_SHORT).show());
+
+                mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, refreshError -> {
+                    if (refreshError != null) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi đọc thẻ nhớ: " + refreshError.getDescription(), Toast.LENGTH_SHORT).show());
+                        return;
+                    }
+
+                    List<MediaFile> fileList = mediaManager.getSDCardFileListSnapshot();
+                    if (fileList == null || fileList.isEmpty()) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Thẻ nhớ chưa có ảnh/video!", Toast.LENGTH_SHORT).show());
+                        return;
+                    }
+
+                    storageFiles.clear();
+                    storageFiles.addAll(fileList);
+
+                    runOnUiThread(() -> {
+                        adapter.notifyDataSetChanged();
+                        Toast.makeText(MainActivity.this, "Đã tìm thấy " + storageFiles.size() + " file", Toast.LENGTH_SHORT).show();
+                    });
+                });
+            }, 500);
+        });
+    }
 }

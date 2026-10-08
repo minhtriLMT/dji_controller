@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "819409556764",
+    "project_id": "djicontroller-e9350",
+    "storage_bucket": "djicontroller-e9350.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:819409556764:android:32f54d56529c2f871756d9",
+        "android_client_info": {
+          "package_name": "com.tri.djicontrol"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBUNYhv94dNRypNdQJVdKgveFH6ih1RpwY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
