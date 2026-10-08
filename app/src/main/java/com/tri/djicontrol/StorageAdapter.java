@@ -3,6 +3,7 @@ package com.tri.djicontrol;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.media.ExifInterface;
+import android.media.MediaScannerConnection;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.LayoutInflater;
@@ -14,17 +15,29 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.app.AlertDialog;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import dji.common.camera.SettingsDefinitions;
 import dji.common.error.DJIError;
 import dji.sdk.media.DownloadListener;
 import dji.sdk.media.MediaFile;
+import dji.sdk.products.Aircraft;
+import dji.sdk.sdkmanager.DJISDKManager;
 import com.tri.djicontrol.firebase.FirebaseHelper;
 
 public class StorageAdapter extends BaseAdapter {
@@ -105,11 +118,8 @@ public class StorageAdapter extends BaseAdapter {
         }
 
         view.setOnClickListener(v -> {
-            if (mediaFile.getMediaType() == MediaFile.MediaType.JPEG
-                    || mediaFile.getMediaType() == MediaFile.MediaType.TIFF) {
-                Bitmap clickedThumbnail = mediaFile.getThumbnail();
-                showImageDialog(context, clickedThumbnail, mediaFile);
-            }
+            Bitmap clickedThumbnail = mediaFile.getThumbnail();
+            showImageDialog(context, clickedThumbnail, mediaFile);
         });
 
         return view;
@@ -154,43 +164,181 @@ public class StorageAdapter extends BaseAdapter {
 
         dialog.setContentView(rootLayout);
 
-        File destDir = new File(context.getExternalFilesDir(null), "DJI_Downloads");
-        if (!destDir.exists()) destDir.mkdirs();
-        File downloadedFile = new File(destDir, mediaFile.getFileName());
+        File downloadDir = new File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                "DJI_Photos"
+        );
+
+        if (!downloadDir.exists()) {
+            boolean created = downloadDir.mkdirs();
+            if (!created && !downloadDir.exists()) {
+                downloadDir = new File(context.getExternalFilesDir(null), "DJI_Downloads");
+                if (!downloadDir.exists()) {
+                    downloadDir.mkdirs();
+                }
+            }
+        }
+
+        final File finalDownloadDir = downloadDir;
 
         btnDownload.setOnClickListener(v -> {
-            Toast.makeText(context, "Đang kết nối tải ảnh...", Toast.LENGTH_SHORT).show();
 
-            mediaFile.fetchFileData(destDir, mediaFile.getFileName(), new DownloadListener<String>() {
-                @Override public void onStart() {}
-                @Override public void onRateUpdate(long total, long current, long persize) {}
-                @Override public void onProgress(long total, long current) {}
+            if (mediaFile == null) {
+                Toast.makeText(
+                        context,
+                        "mediaFile = NULL!",
+                        Toast.LENGTH_LONG
+                ).show();
+                return;
+            }
 
-                @Override
-                public void onSuccess(String filePath) {
-                    new Handler(Looper.getMainLooper()).post(() -> {
-                        Toast.makeText(context, "Tải xong! Đang lưu vào thư viện...", Toast.LENGTH_SHORT).show();
-                        // Sử dụng đường dẫn tuyệt đối của downloadedFile thay vì filePath từ DJI để tránh rủi ro
-                        processAndShowMetadata(context, downloadedFile.getAbsolutePath(), false);
-                    });
+            String fileName = mediaFile.getFileName();
+
+            if (fileName == null || fileName.isEmpty()) {
+                Toast.makeText(
+                        context,
+                        "Không lấy được tên file!",
+                        Toast.LENGTH_LONG
+                ).show();
+                return;
+            }
+
+            Toast.makeText(
+                    context,
+                    "Bắt đầu tải: " + fileName,
+                    Toast.LENGTH_SHORT
+            ).show();
+
+            // Đảm bảo Camera ở chế độ MEDIA_DOWNLOAD trước khi tải
+            if (DJISDKManager.getInstance().getProduct() != null &&
+                    DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
+                Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
+                if (aircraft.getCamera() != null) {
+                    aircraft.getCamera().setMode(SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD, null);
                 }
+            }
 
-                @Override
-                public void onFailure(DJIError djiError) {
-                    new Handler(Looper.getMainLooper()).post(() ->
-                            Toast.makeText(context, "Lỗi kết nối thẻ nhớ: " + (djiError != null ? djiError.getDescription() : "Timeout"), Toast.LENGTH_LONG).show()
-                    );
-                }
+            mediaFile.fetchFileData(
+                    finalDownloadDir,
+                    fileName,
+                    new DownloadListener<String>() {
 
-                @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
-            });
+                        @Override
+                        public void onStart() {
+                            new Handler(Looper.getMainLooper()).post(() ->
+                                    Toast.makeText(
+                                            context,
+                                            "DJI bắt đầu tải...",
+                                            Toast.LENGTH_SHORT
+                                    ).show()
+                            );
+                        }
+
+                        @Override
+                        public void onRateUpdate(
+                                long total,
+                                long current,
+                                long persize
+                        ) {
+                        }
+
+                        @Override
+                        public void onProgress(
+                                long total,
+                                long current
+                        ) {
+                        }
+
+                        @Override
+                        public void onSuccess(String filePath) {
+
+                            new Handler(Looper.getMainLooper()).post(() -> {
+
+                                Toast.makeText(
+                                        context,
+                                        "DJI tải xong! Đang lưu vào bộ sưu tập...",
+                                        Toast.LENGTH_SHORT
+                                ).show();
+
+                                if (filePath != null) {
+                                    MediaScannerConnection.scanFile(
+                                            context,
+                                            new String[]{filePath},
+                                            null,
+                                            null
+                                    );
+                                    processAndShowMetadata(context, filePath, false);
+                                } else {
+                                    Toast.makeText(
+                                            context,
+                                            "Lỗi: filePath từ DJI trả về NULL!",
+                                            Toast.LENGTH_LONG
+                                    ).show();
+                                }
+                            });
+                        }
+
+                        @Override
+                        public void onFailure(DJIError djiError) {
+
+                            new Handler(Looper.getMainLooper()).post(() -> {
+
+                                String error = djiError != null
+                                        ? djiError.getDescription()
+                                        : "Không xác định";
+
+                                Toast.makeText(
+                                        context,
+                                        "DJI lỗi tải file:\n" + error,
+                                        Toast.LENGTH_LONG
+                                ).show();
+                            });
+                        }
+
+                        @Override
+                        public void onRealtimeDataUpdate(
+                                byte[] bytes,
+                                long l,
+                                boolean b
+                        ) {
+                        }
+                    }
+            );
         });
 
         btnFirebase.setOnClickListener(v -> {
+
+            File downloadedFile = new File(
+                    finalDownloadDir,
+                    mediaFile.getFileName()
+            );
+
+            if (!downloadedFile.exists() || downloadedFile.length() == 0) {
+                // Thử tìm ở thư mục fallback
+                File fallbackFile = new File(
+                        new File(context.getExternalFilesDir(null), "DJI_Downloads"),
+                        mediaFile.getFileName()
+                );
+                if (fallbackFile.exists() && fallbackFile.length() > 0) {
+                    downloadedFile = fallbackFile;
+                }
+            }
+
             if (downloadedFile.exists() && downloadedFile.length() > 0) {
-                processAndShowMetadata(context, downloadedFile.getAbsolutePath(), true);
+
+                processAndShowMetadata(
+                        context,
+                        downloadedFile.getAbsolutePath(),
+                        true
+                );
+
             } else {
-                Toast.makeText(context, "Vui lòng ấn 'TẢI VỀ MÁY' trước khi đưa lên Firebase!", Toast.LENGTH_SHORT).show();
+
+                Toast.makeText(
+                        context,
+                        "Vui lòng tải ảnh về máy trước!",
+                        Toast.LENGTH_SHORT
+                ).show();
             }
         });
 
@@ -206,95 +354,217 @@ public class StorageAdapter extends BaseAdapter {
 
     private void processAndShowMetadata(Context context, String absolutePath, boolean forFirebase) {
         File sourceFile = new File(absolutePath);
+
         if (!sourceFile.exists() || sourceFile.length() == 0) {
-            Toast.makeText(context, "Lỗi: File ảnh bị hỏng hoặc chưa tải xong!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(
+                    context,
+                    "Lỗi: File ảnh/video bị hỏng hoặc chưa tải xong!",
+                    Toast.LENGTH_SHORT
+            ).show();
             return;
         }
 
         String displayTime = "Không xác định";
         String gpsInfo = "Chưa lưu GPS";
 
-        // TÁCH RIÊNG PHẦN ĐỌC EXIF (Nếu lỗi đọc thông tin thì BỎ QUA, VẪN TIẾP TỤC LƯU ẢNH)
+        // Đọc thông tin EXIF
         try {
             ExifInterface exif = new ExifInterface(absolutePath);
+
             String dateTime = exif.getAttribute(ExifInterface.TAG_DATETIME);
+
             if (dateTime != null) {
-                SimpleDateFormat exifFormat = new SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US);
-                SimpleDateFormat newFormat = new SimpleDateFormat("EEEE, 'ngày' dd/MM/yyyy 'lúc' HH:mm:ss", new Locale("vi", "VN"));
+                SimpleDateFormat exifFormat =
+                        new SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US);
+
+                SimpleDateFormat newFormat =
+                        new SimpleDateFormat(
+                                "EEEE, 'ngày' dd/MM/yyyy 'lúc' HH:mm:ss",
+                                new Locale("vi", "VN")
+                        );
+
                 Date d = exifFormat.parse(dateTime);
-                if (d != null) displayTime = newFormat.format(d);
+
+                if (d != null) {
+                    displayTime = newFormat.format(d);
+                }
             }
 
             float[] latLong = new float[2];
+
             if (exif.getLatLong(latLong)) {
-                gpsInfo = String.format(Locale.US, "Vĩ độ: %.6f\nKinh độ: %.6f", latLong[0], latLong[1]);
+                gpsInfo = String.format(
+                        Locale.US,
+                        "Vĩ độ: %.6f\nKinh độ: %.6f",
+                        latLong[0],
+                        latLong[1]
+                );
             }
+
         } catch (Exception ignored) {
-            // Không làm ứng dụng sụp đổ nếu ảnh không có dữ liệu định vị
+            // Không có EXIF vẫn tiếp tục lưu
         }
 
-        String metaInfo = "Thời gian chụp: " + displayTime + "\n" + gpsInfo;
+        String metaInfo =
+                "Thời gian chụp: " + displayTime +
+                        "\n" + gpsInfo;
 
+        // ==============================
+        // LƯU VÀO GALLERY ĐIỆN THOẠI
+        // ==============================
         if (!forFirebase) {
-            // PHẦN LƯU VÀO THƯ VIỆN ĐIỆN THOẠI (GALLERY)
+
             try {
-                android.content.ContentValues values = new android.content.ContentValues();
-                values.put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, sourceFile.getName());
-                values.put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                MediaScannerConnection.scanFile(
+                        context,
+                        new String[]{sourceFile.getAbsolutePath()},
+                        null,
+                        null
+                );
 
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                    values.put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DJI_Captured_Photos");
-                    values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 1);
-                }
+                boolean isInPublicFolder = absolutePath.contains("/DCIM/")
+                        || absolutePath.contains("/Pictures/")
+                        || absolutePath.contains("/Movies/");
 
-                android.content.ContentResolver resolver = context.getContentResolver();
-                android.net.Uri collection = android.provider.MediaStore.Images.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY);
-                android.net.Uri imageUri = resolver.insert(collection, values);
+                if (!isInPublicFolder) {
+                    boolean isVideo = absolutePath.toLowerCase().endsWith(".mp4")
+                            || absolutePath.toLowerCase().endsWith(".mov");
 
-                if (imageUri != null) {
-                    try (java.io.OutputStream out = resolver.openOutputStream(imageUri);
-                         InputStream in = new java.io.FileInputStream(sourceFile)) {
-                        byte[] buffer = new byte[4096];
-                        int read;
-                        while ((read = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, read);
+                    ContentResolver resolver = context.getContentResolver();
+                    ContentValues values = new ContentValues();
+
+                    values.put(MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.getName());
+                    values.put(MediaStore.MediaColumns.MIME_TYPE, isVideo ? "video/mp4" : "image/jpeg");
+
+                    Uri collection;
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        values.put(
+                                MediaStore.MediaColumns.RELATIVE_PATH,
+                                isVideo ? (Environment.DIRECTORY_MOVIES + "/DJI_Captured_Videos")
+                                        : (Environment.DIRECTORY_PICTURES + "/DJI_Captured_Photos")
+                        );
+                        values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                        collection = isVideo
+                                ? MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                                : MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                    } else {
+                        File targetDir = new File(
+                                Environment.getExternalStoragePublicDirectory(
+                                        isVideo ? Environment.DIRECTORY_MOVIES : Environment.DIRECTORY_PICTURES
+                                ),
+                                isVideo ? "DJI_Captured_Videos" : "DJI_Captured_Photos"
+                        );
+                        if (!targetDir.exists()) targetDir.mkdirs();
+                        File targetFile = new File(targetDir, sourceFile.getName());
+                        values.put(MediaStore.MediaColumns.DATA, targetFile.getAbsolutePath());
+                        collection = isVideo
+                                ? MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                                : MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+                    }
+
+                    Uri mediaUri = resolver.insert(collection, values);
+
+                    if (mediaUri != null) {
+                        try (InputStream in = new FileInputStream(sourceFile);
+                             OutputStream out = resolver.openOutputStream(mediaUri)) {
+
+                            if (out != null) {
+                                byte[] buffer = new byte[8192];
+                                int read;
+                                while ((read = in.read(buffer)) != -1) {
+                                    out.write(buffer, 0, read);
+                                }
+                                out.flush();
+                            }
                         }
-                    }
 
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                        values.clear();
-                        values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0);
-                        resolver.update(imageUri, values, null, null);
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            ContentValues updateValues = new ContentValues();
+                            updateValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                            resolver.update(mediaUri, updateValues, null, null);
+                        }
+
+                        MediaScannerConnection.scanFile(
+                                context,
+                                new String[]{sourceFile.getAbsolutePath()},
+                                null,
+                                null
+                        );
                     }
                 }
 
-                android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(context);
-                builder.setTitle("Đã lưu vào Thư Viện Ảnh!");
-                builder.setMessage("Ảnh đã xuất hiện trong bộ sưu tập (Thư mục: DJI_Captured_Photos).\n\n--- THÔNG TIN ẢNH ---\n" + metaInfo);
-                builder.setPositiveButton("ĐÓNG", null);
-                builder.show();
+                Toast.makeText(
+                        context,
+                        "Đã lưu vào bộ sưu tập điện thoại!",
+                        Toast.LENGTH_SHORT
+                ).show();
+
+                new AlertDialog.Builder(context)
+                        .setTitle("Thông tin File")
+                        .setMessage(metaInfo + "\n\nĐường dẫn:\n" + absolutePath)
+                        .setPositiveButton("OK", null)
+                        .show();
 
             } catch (Exception e) {
-                e.printStackTrace();
-                Toast.makeText(context, "Lỗi khi chép file vào thư viện ảnh: " + e.getMessage(), Toast.LENGTH_LONG).show();
+
+                String error = e.getClass().getSimpleName()
+                        + ": "
+                        + e.getMessage();
+
+                Toast.makeText(
+                        context,
+                        "LỖI PROCESS:\n" + error,
+                        Toast.LENGTH_LONG
+                ).show();
             }
+
         } else {
+
+            // ==============================
             // TẢI LÊN FIREBASE
-            FirebaseHelper.uploadImageToFirebase(sourceFile, new FirebaseHelper.UploadCallback() {
-                @Override public void onProgress(int progress, double speedKBps) {}
-                @Override
-                public void onSuccess(String downloadUrl) {
-                    new Handler(Looper.getMainLooper()).post(() ->
-                            Toast.makeText(context, "Đã đẩy ảnh lên Firebase thành công!", Toast.LENGTH_SHORT).show()
-                    );
-                }
-                @Override
-                public void onFailure(String error) {
-                    new Handler(Looper.getMainLooper()).post(() ->
-                            Toast.makeText(context, "Lỗi upload Firebase: " + error, Toast.LENGTH_LONG).show()
-                    );
-                }
-            });
+            // ==============================
+
+            FirebaseHelper.uploadImageToFirebase(
+                    sourceFile,
+                    new FirebaseHelper.UploadCallback() {
+
+                        @Override
+                        public void onProgress(
+                                int progress,
+                                double speedKBps
+                        ) {
+                        }
+
+                        @Override
+                        public void onSuccess(String downloadUrl) {
+
+                            new Handler(
+                                    Looper.getMainLooper()
+                            ).post(() ->
+                                    Toast.makeText(
+                                            context,
+                                            "Đã đẩy ảnh lên Firebase thành công!",
+                                            Toast.LENGTH_SHORT
+                                    ).show()
+                            );
+                        }
+
+                        @Override
+                        public void onFailure(String error) {
+
+                            new Handler(
+                                    Looper.getMainLooper()
+                            ).post(() ->
+                                    Toast.makeText(
+                                            context,
+                                            "Lỗi upload Firebase: " + error,
+                                            Toast.LENGTH_LONG
+                                    ).show()
+                            );
+                        }
+                    }
+            );
         }
     }
 }
