@@ -76,14 +76,35 @@
                 android:textColor="#BDBDBD"
                 android:textSize="11sp" />
 
-            <Button
-                android:id="@+id/btnEditWPField"
-                android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:layout_marginTop="8dp"
-                android:minHeight="0dp"
-                android:text="CHỌN / CHỈNH KHU VỰC"
-                android:textSize="9sp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <Button
+                    android:id="@+id/btnEditWPField"
+                    android:layout_width="0dp"
+                    android:layout_height="34dp"
+                    android:layout_weight="1"
+                    android:minHeight="0dp"
+                    android:text="CHỌN / CHỈNH KHU VỰC"
+                    android:textSize="9sp" />
+
+                <Space
+                    android:layout_width="8dp"
+                    android:layout_height="match_parent" />
+
+                <Button
+                    android:id="@+id/btnLoadSavedField"
+                    android:layout_width="0dp"
+                    android:layout_height="34dp"
+                    android:layout_weight="1"
+                    android:minHeight="0dp"
+                    android:text="CHỌN MẢNH ĐÃ LƯU"
+                    android:textSize="9sp" />
+
+            </LinearLayout>
 
         </LinearLayout>
 

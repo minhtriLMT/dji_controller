@@ -49,8 +49,11 @@ import org.maplibre.geojson.Point;
 import java.util.ArrayList;
 import java.util.List;
 
+import dji.common.model.LocationCoordinate2D;
+
 import dji.sdk.products.Aircraft;
 import dji.sdk.sdkmanager.DJISDKManager;
+import com.tri.djicontrol.firebase.FirebaseHelper;
 
 import static org.maplibre.android.style.layers.PropertyFactory.fillColor;
 import static org.maplibre.android.style.layers.PropertyFactory.fillOpacity;
@@ -190,8 +193,6 @@ public class MapActivity extends AppCompatActivity {
                 Toast.makeText(MapActivity.this, "Không thể tính diện tích khu vực!", Toast.LENGTH_SHORT).show();
                 return;
             }
-            android.content.Intent resultIntent = new android.content.Intent();
-            resultIntent.putExtra("FIELD_AREA_HA", currentAreaHa);
 
             double[] latitudes = new double[fieldMarkers.size()];
             double[] longitudes = new double[fieldMarkers.size()];
@@ -200,12 +201,49 @@ public class MapActivity extends AppCompatActivity {
                 latitudes[i] = position.getLatitude();
                 longitudes[i] = position.getLongitude();
             }
-            resultIntent.putExtra("FIELD_LATITUDES", latitudes);
-            resultIntent.putExtra("FIELD_LONGITUDES", longitudes);
-            setResult(RESULT_OK, resultIntent);
 
-            finish();
+            android.widget.EditText input = new android.widget.EditText(MapActivity.this);
+            input.setHint("Nhập tên mảnh ruộng (vd: Mảnh lúa số 1)");
+            input.setTextColor(android.graphics.Color.BLACK);
+            input.setHintTextColor(android.graphics.Color.GRAY);
+            input.setPadding(40, 20, 40, 20);
+
+            new android.app.AlertDialog.Builder(MapActivity.this)
+                    .setTitle("LƯU MẢNH RUỘNG LÊN FIREBASE")
+                    .setMessage("Bạn có muốn lưu mảng ruộng này lên Firebase để sau này bay lại không?")
+                    .setView(input)
+                    .setPositiveButton("LƯU & XÁC NHẬN", (dialog, which) -> {
+                        String fieldName = input.getText().toString().trim();
+                        FirebaseHelper.saveFieldToFirestore(
+                                fieldName, currentAreaHa, latitudes, longitudes, "",
+                                new FirebaseHelper.FirestoreCallback() {
+                                    @Override
+                                    public void onSuccess(String documentId) {
+                                        runOnUiThread(() -> Toast.makeText(MapActivity.this, "Đã lưu mảnh ruộng lên Firebase thành công!", Toast.LENGTH_SHORT).show());
+                                    }
+                                    @Override
+                                    public void onFailure(String error) {
+                                        runOnUiThread(() -> Toast.makeText(MapActivity.this, "Lỗi lưu Firebase: " + error, Toast.LENGTH_SHORT).show());
+                                    }
+                                }
+                        );
+
+                        returnResultAndFinish(latitudes, longitudes);
+                    })
+                    .setNegativeButton("CHỈ XÁC NHẬN", (dialog, which) -> {
+                        returnResultAndFinish(latitudes, longitudes);
+                    })
+                    .show();
         });
+    }
+
+    private void returnResultAndFinish(double[] latitudes, double[] longitudes) {
+        android.content.Intent resultIntent = new android.content.Intent();
+        resultIntent.putExtra("FIELD_AREA_HA", currentAreaHa);
+        resultIntent.putExtra("FIELD_LATITUDES", latitudes);
+        resultIntent.putExtra("FIELD_LONGITUDES", longitudes);
+        setResult(RESULT_OK, resultIntent);
+        finish();
     }
 
     private void reloadMapStyle() {
@@ -269,8 +307,35 @@ public class MapActivity extends AppCompatActivity {
             );
             style.addLayer(droneLayer);
 
-            // Phục hồi khung đa giác nếu có
-            if (editField && oldLatitudes != null && oldLongitudes != null
+            // 5. Home Icon
+            Drawable homeDrawable = getResources().getDrawable(android.R.drawable.ic_menu_myplaces);
+            Bitmap homeBitmap = Bitmap.createBitmap(
+                    homeDrawable.getIntrinsicWidth() > 0 ? homeDrawable.getIntrinsicWidth() : 64,
+                    homeDrawable.getIntrinsicHeight() > 0 ? homeDrawable.getIntrinsicHeight() : 64,
+                    Bitmap.Config.ARGB_8888
+            );
+            Canvas homeCanvas = new Canvas(homeBitmap);
+            homeDrawable.setBounds(0, 0, homeCanvas.getWidth(), homeCanvas.getHeight());
+            homeDrawable.draw(homeCanvas);
+            style.addImage("home-icon", homeBitmap);
+
+            GeoJsonSource homeSource = new GeoJsonSource("home-source");
+            style.addSource(homeSource);
+            SymbolLayer homeLayer = new SymbolLayer("home-layer", "home-source");
+            homeLayer.setProperties(
+                    iconImage("home-icon"),
+                    iconSize(0.8f),
+                    iconAllowOverlap(true),
+                    iconIgnorePlacement(true)
+            );
+            style.addLayer(homeLayer);
+
+            // Phục hồi khung đa giác từ MainActivity.sharedFieldPoints hoặc Intent nếu có
+            if (MainActivity.sharedFieldPoints != null && MainActivity.sharedFieldPoints.size() == 4 && fieldMarkers.isEmpty()) {
+                for (int i = 0; i < 4; i++) {
+                    addFieldPoint(MainActivity.sharedFieldPoints.get(i));
+                }
+            } else if (editField && oldLatitudes != null && oldLongitudes != null
                     && oldLatitudes.length == 4 && oldLongitudes.length == 4 && fieldMarkers.isEmpty()) {
                 for (int i = 0; i < 4; i++) addFieldPoint(new LatLng(oldLatitudes[i], oldLongitudes[i]));
             }
@@ -306,26 +371,38 @@ public class MapActivity extends AppCompatActivity {
             }
         }
 
-        // CẬP NHẬT VỊ TRÍ ICON DRONE
+        // CẬP NHẬT VỊ TRÍ ICON DRONE VÀ HOME POINT
         if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
             Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
             if (aircraft != null && aircraft.getFlightController() != null) {
                 dji.common.flightcontroller.FlightControllerState state = aircraft.getFlightController().getState();
-                if (state != null && state.getAircraftLocation() != null) {
-                    double lat = state.getAircraftLocation().getLatitude();
-                    double lng = state.getAircraftLocation().getLongitude();
-
-                    if (!Double.isNaN(lat) && !Double.isNaN(lng)) {
-                        double yaw = state.getAttitude().yaw;
-                        JsonObject properties = new JsonObject();
-                        properties.addProperty("bearing", yaw);
-
-                        Feature feature = Feature.fromGeometry(Point.fromLngLat(lng, lat), properties);
-
+                if (state != null) {
+                    LocationCoordinate2D homeLoc = state.getHomeLocation();
+                    if (homeLoc != null && !Double.isNaN(homeLoc.getLatitude()) && homeLoc.getLatitude() != 0) {
                         if (mapLibreMap != null && mapLibreMap.getStyle() != null) {
-                            GeoJsonSource source = mapLibreMap.getStyle().getSourceAs(DRONE_SOURCE_ID);
-                            if (source != null) {
-                                source.setGeoJson(feature);
+                            GeoJsonSource homeSrc = mapLibreMap.getStyle().getSourceAs("home-source");
+                            if (homeSrc != null) {
+                                homeSrc.setGeoJson(Feature.fromGeometry(Point.fromLngLat(homeLoc.getLongitude(), homeLoc.getLatitude())));
+                            }
+                        }
+                    }
+
+                    if (state.getAircraftLocation() != null) {
+                        double lat = state.getAircraftLocation().getLatitude();
+                        double lng = state.getAircraftLocation().getLongitude();
+
+                        if (!Double.isNaN(lat) && !Double.isNaN(lng)) {
+                            double yaw = state.getAttitude().yaw;
+                            JsonObject properties = new JsonObject();
+                            properties.addProperty("bearing", yaw);
+
+                            Feature feature = Feature.fromGeometry(Point.fromLngLat(lng, lat), properties);
+
+                            if (mapLibreMap != null && mapLibreMap.getStyle() != null) {
+                                GeoJsonSource source = mapLibreMap.getStyle().getSourceAs(DRONE_SOURCE_ID);
+                                if (source != null) {
+                                    source.setGeoJson(feature);
+                                }
                             }
                         }
                     }

@@ -46,6 +46,15 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.annotation.NonNull;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import android.Manifest;
+import android.content.pm.PackageManager;
+import org.maplibre.android.location.LocationComponent;
+import org.maplibre.android.location.LocationComponentActivationOptions;
+import org.maplibre.android.location.modes.CameraMode;
+import org.maplibre.android.location.modes.RenderMode;
 import org.maplibre.android.MapLibre;
 import org.maplibre.android.maps.MapLibreMap;
 import org.maplibre.android.maps.MapView;
@@ -138,11 +147,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     public static final List<Point> sharedFlightPath = new ArrayList<>();
     public static final List<Point> sharedGridPoints = new ArrayList<>();
+    public static final List<LatLng> sharedFieldPoints = new ArrayList<>();
 
     private static final int REQUEST_FIELD_MAP = 1001;
     private TextView tvFieldArea;
     private double fieldAreaHa = 0.0;
     private final List<LatLng> fieldPoints = new ArrayList<>();
+    private List<LocationCoordinate2D> cachedGridWaypoints = new ArrayList<>();
     private Button btnReturnStop;
 
     private WaypointMissionManager waypointMissionManager;
@@ -298,6 +309,32 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                 iconRotate(Expression.get("bearing"))
                         );
                         style.addLayer(droneLayer);
+
+                        // Kích hoạt hiển thị vị trí điện thoại trên miniMap
+                        enableMiniMapLocationComponent(style);
+
+                        // Home Icon trên miniMap
+                        Drawable homeDrawable = getResources().getDrawable(android.R.drawable.ic_menu_myplaces);
+                        Bitmap homeBitmap = Bitmap.createBitmap(
+                                homeDrawable.getIntrinsicWidth() > 0 ? homeDrawable.getIntrinsicWidth() : 64,
+                                homeDrawable.getIntrinsicHeight() > 0 ? homeDrawable.getIntrinsicHeight() : 64,
+                                Bitmap.Config.ARGB_8888
+                        );
+                        Canvas homeCanvas = new Canvas(homeBitmap);
+                        homeDrawable.setBounds(0, 0, homeCanvas.getWidth(), homeCanvas.getHeight());
+                        homeDrawable.draw(homeCanvas);
+                        style.addImage("home-icon", homeBitmap);
+
+                        GeoJsonSource homeSource = new GeoJsonSource("home-source");
+                        style.addSource(homeSource);
+                        SymbolLayer homeLayer = new SymbolLayer("home-layer", "home-source");
+                        homeLayer.setProperties(
+                                iconImage("home-icon"),
+                                iconSize(0.8f),
+                                iconAllowOverlap(true),
+                                iconIgnorePlacement(true)
+                        );
+                        style.addLayer(homeLayer);
 
                         updateMiniMapPolygon();
                     }
@@ -528,6 +565,15 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                                             fpSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(sharedFlightPath)));
                                                         }
                                                     }
+
+                                                    LocationCoordinate2D homeLoc = state.getHomeLocation();
+                                                    if (homeLoc != null && !Double.isNaN(homeLoc.getLatitude()) && homeLoc.getLatitude() != 0) {
+                                                        GeoJsonSource homeSrc = miniMapLibreMap.getStyle().getSourceAs("home-source");
+                                                        if (homeSrc != null) {
+                                                            homeSrc.setGeoJson(Feature.fromGeometry(Point.fromLngLat(homeLoc.getLongitude(), homeLoc.getLatitude())));
+                                                        }
+                                                    }
+
                                                     miniMapLibreMap.setCameraPosition(
                                                             new org.maplibre.android.camera.CameraPosition.Builder()
                                                                     .target(lastDroneLocation)
@@ -1176,13 +1222,23 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 double firstLng = intersectLngs.get(0);
                 double lastLng = intersectLngs.get(intersectLngs.size() - 1);
 
-                if (leftToRight) {
-                    waypoints.add(new LocationCoordinate2D(lat, firstLng));
-                    waypoints.add(new LocationCoordinate2D(lat, lastLng));
-                } else {
-                    waypoints.add(new LocationCoordinate2D(lat, lastLng));
-                    waypoints.add(new LocationCoordinate2D(lat, firstLng));
+                // Tối ưu hóa quét map (Photogrammetry): Nội suy các điểm waypoint trung gian dọc theo đường bay
+                // để đảm bảo độ phủ (overlap) ảnh chụp theo cả 2 chiều X và Y, tránh bỏ sót chi tiết.
+                double distanceMeters = calculateHaversineDistance(lat, firstLng, lat, lastLng);
+                int numSteps = (int) Math.max(1, Math.round(distanceMeters / Math.max(2.0, spacingMeters)));
+
+                List<LocationCoordinate2D> lineWaypoints = new ArrayList<>();
+                for (int s = 0; s <= numSteps; s++) {
+                    double fraction = (double) s / numSteps;
+                    double lng = firstLng + fraction * (lastLng - firstLng);
+                    lineWaypoints.add(new LocationCoordinate2D(lat, lng));
                 }
+
+                if (!leftToRight) {
+                    Collections.reverse(lineWaypoints);
+                }
+
+                waypoints.addAll(lineWaypoints);
                 leftToRight = !leftToRight;
             }
         }
@@ -1198,6 +1254,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         TextView tvWPFieldStatus = dialog.findViewById(R.id.tvWPFieldStatus);
         TextView tvWPFieldArea = dialog.findViewById(R.id.tvWPFieldArea);
         Button btnStartMapping = dialog.findViewById(R.id.btnStartMapping);
+        Button btnCreateWP = dialog.findViewById(R.id.btnCreateWP);
+        Button btnConfirmWP = dialog.findViewById(R.id.btnConfirmWP);
+        Button btnClearWP = dialog.findViewById(R.id.btnClearWP);
 
         android.widget.EditText edtWPAltitude = dialog.findViewById(R.id.edtWPAltitude);
         android.widget.EditText edtWPLineSpacing = dialog.findViewById(R.id.edtWPLineSpacing);
@@ -1212,39 +1271,24 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             if(btnStartMapping != null) btnStartMapping.setVisibility(View.GONE);
         }
 
+        // 3. NHẤN BẮT ĐẦU QUÉT MAP
         if(btnStartMapping != null) {
             btnStartMapping.setOnClickListener(view -> {
-                // THÊM TIẾNG BÍP
                 playSystemSound();
-
                 if (fieldPoints.size() == 4) {
-                    final float targetAltitude; // final để dùng trong callback
-                    final double pathSpacing;
-
+                    double space = 5.0;
                     try {
-                        float alt = 10.0f;
-                        double space = 5.0;
-                        if (edtWPAltitude != null && !edtWPAltitude.getText().toString().isEmpty()) {
-                            alt = Float.parseFloat(edtWPAltitude.getText().toString());
-                        }
                         if (edtWPLineSpacing != null && !edtWPLineSpacing.getText().toString().isEmpty()) {
                             space = Double.parseDouble(edtWPLineSpacing.getText().toString());
                         }
-                        targetAltitude = alt;
-                        pathSpacing = space;
-                    } catch (NumberFormatException e) {
-                        Toast.makeText(MainActivity.this, "Vui lòng nhập thông số hợp lệ!", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
+                    } catch (NumberFormatException ignored) {}
 
-                    // 1. Tạo điểm lưới quét
-                    final List<LocationCoordinate2D> gridWaypoints = generateGrid(fieldPoints, pathSpacing);
+                    cachedGridWaypoints = generateGrid(fieldPoints, space);
 
-                    if (!gridWaypoints.isEmpty()) {
-                        // 2. Chỉ hiển thị (VẼ LÊN BẢN ĐỒ TRƯỚC), CHƯA BAY NGAY
+                    if (!cachedGridWaypoints.isEmpty()) {
                         sharedGridPoints.clear();
                         sharedFlightPath.clear();
-                        for (LocationCoordinate2D wp : gridWaypoints) {
+                        for (LocationCoordinate2D wp : cachedGridWaypoints) {
                             sharedGridPoints.add(Point.fromLngLat(wp.getLongitude(), wp.getLatitude()));
                         }
 
@@ -1255,50 +1299,162 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             }
                         }
 
-                        // 3. TẠO HỘP THOẠI HỎI XÁC NHẬN TRƯỚC KHI BAY
-                        new android.app.AlertDialog.Builder(MainActivity.this)
-                                .setTitle("XÁC NHẬN LỘ TRÌNH BAY")
-                                .setMessage("Đã tính toán xong lộ trình.\n" +
-                                        "- Tổng số điểm: " + gridWaypoints.size() + " điểm\n" +
-                                        "- Độ cao: " + targetAltitude + " mét\n\n" +
-                                        "Bạn có chắc chắn muốn Drone BẮT ĐẦU BAY quét tự động không?")
-                                .setPositiveButton("XÁC NHẬN BAY", (dialogInterface, i) -> {
-                                    // NGƯỜI DÙNG BẤM "XÁC NHẬN" -> LÚC NÀY MỚI GỬI LỆNH LÊN DRONE
-
-                                    if(waypointMissionManager != null) {
-                                        waypointMissionManager.startMission(gridWaypoints, targetAltitude, message -> {
-                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show());
-                                        });
-                                    }
-
-                                    // Chỉnh Gimbal xoay xuống -90 độ để chụp vuông góc
-                                    if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
-                                        dji.sdk.gimbal.Gimbal gimbal = ((Aircraft) DJISDKManager.getInstance().getProduct()).getGimbal();
-                                        if (gimbal != null) {
-                                            dji.common.gimbal.Rotation rotation = new dji.common.gimbal.Rotation.Builder()
-                                                    .mode(dji.common.gimbal.RotationMode.ABSOLUTE_ANGLE)
-                                                    .pitch(-90f)
-                                                    .time(2.0)
-                                                    .build();
-                                            gimbal.rotate(rotation, null);
-                                        }
-                                    }
-
-                                    Toast.makeText(MainActivity.this, "ĐÃ GỬI LỆNH BAY VỚI " + gridWaypoints.size() + " ĐIỂM!", Toast.LENGTH_SHORT).show();
-                                    dialog.dismiss(); // Tắt hộp thoại cài đặt WPDialog gốc
-                                })
-                                .setNegativeButton("CHƯA BAY", (dialogInterface, i) -> {
-                                    // Bấm Chưa Bay -> Đóng hộp thoại xác nhận, vẫn giữ nguyên Dialog thông số
-                                    dialogInterface.dismiss();
-                                })
-                                .show();
-
+                        Toast.makeText(MainActivity.this, "Đã quét map thành công! Tổng số điểm: " + cachedGridWaypoints.size(), Toast.LENGTH_SHORT).show();
                     } else {
                         Toast.makeText(MainActivity.this, "Khu vực quá hẹp hoặc sai thông số lưới!", Toast.LENGTH_SHORT).show();
                     }
                 } else {
                     Toast.makeText(MainActivity.this, "Vui lòng khoanh đủ 4 góc khu vực quét!", Toast.LENGTH_SHORT).show();
                 }
+            });
+        }
+
+        // 4. NHẤN TẠO LỘ TRÌNH
+        if (btnCreateWP != null) {
+            btnCreateWP.setOnClickListener(view -> {
+                playSystemSound();
+                if (cachedGridWaypoints == null || cachedGridWaypoints.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Vui lòng nhấn Bắt đầu quét map trước!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                float alt = 10.0f;
+                try {
+                    if (edtWPAltitude != null && !edtWPAltitude.getText().toString().isEmpty()) {
+                        alt = Float.parseFloat(edtWPAltitude.getText().toString());
+                    }
+                } catch (NumberFormatException ignored) {}
+
+                Toast.makeText(MainActivity.this, "Đã tạo lộ trình thành công với " + cachedGridWaypoints.size() + " điểm, độ cao " + alt + "m!", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        // 5. NHẤN XÁC NHẬN LỘ TRÌNH -> HIỆN BẢNG BAY HOẶC CHƯA BAY
+        if (btnConfirmWP != null) {
+            btnConfirmWP.setOnClickListener(view -> {
+                playSystemSound();
+                if (cachedGridWaypoints == null || cachedGridWaypoints.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Vui lòng tạo lộ trình trước!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                float alt = 10.0f;
+                try {
+                    if (edtWPAltitude != null && !edtWPAltitude.getText().toString().isEmpty()) {
+                        alt = Float.parseFloat(edtWPAltitude.getText().toString());
+                    }
+                } catch (NumberFormatException ignored) {}
+
+                final float targetAltitude = alt;
+
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("XÁC NHẬN LỘ TRÌNH BAY")
+                        .setMessage("Đã sẵn sàng thực thi lộ trình.\n" +
+                                "- Tổng số điểm: " + cachedGridWaypoints.size() + " điểm\n" +
+                                "- Độ cao: " + targetAltitude + " mét\n\n" +
+                                "Bạn muốn Drone BẮT ĐẦU BAY hay CHƯA BAY?")
+                        .setPositiveButton("XÁC NHẬN BAY", (dialogInterface, i) -> {
+                            if (waypointMissionManager != null) {
+                                waypointMissionManager.startMission(cachedGridWaypoints, targetAltitude, message -> {
+                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_LONG).show());
+                                });
+                            }
+
+                            if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
+                                dji.sdk.gimbal.Gimbal gimbal = ((Aircraft) DJISDKManager.getInstance().getProduct()).getGimbal();
+                                if (gimbal != null) {
+                                    dji.common.gimbal.Rotation rotation = new dji.common.gimbal.Rotation.Builder()
+                                            .mode(dji.common.gimbal.RotationMode.ABSOLUTE_ANGLE)
+                                            .pitch(-90f)
+                                            .time(2.0)
+                                            .build();
+                                    gimbal.rotate(rotation, null);
+                                }
+                            }
+
+                            Toast.makeText(MainActivity.this, "ĐÃ GỬI LỆNH BAY VỚI " + cachedGridWaypoints.size() + " ĐIỂM!", Toast.LENGTH_SHORT).show();
+                            dialog.dismiss();
+                        })
+                        .setNegativeButton("CHƯA BAY", (dialogInterface, i) -> {
+                            dialogInterface.dismiss();
+                        })
+                        .show();
+            });
+        }
+
+        // 6. NHẤN NÚT XÓA LỘ TRÌNH -> XÓA TOÀN BỘ VÀ ĐƯA HÌNH ẢNH LÊN FIREBASE DẠNG NO-SQL (FIRESTORE)
+        if (btnClearWP != null) {
+            btnClearWP.setOnClickListener(view -> {
+                playSystemSound();
+
+                // Xóa toàn bộ
+                fieldPoints.clear();
+                sharedFieldPoints.clear();
+                sharedGridPoints.clear();
+                sharedFlightPath.clear();
+                cachedGridWaypoints.clear();
+
+                if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
+                    GeoJsonSource gridSource = miniMapLibreMap.getStyle().getSourceAs("grid-source");
+                    if (gridSource != null) {
+                        gridSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(new ArrayList<Point>())));
+                    }
+                }
+
+                tvWPFieldStatus.setText("Chưa xác định khu vực");
+                tvWPFieldArea.setText("Diện tích: 0.00 ha");
+
+                // Đưa hình ảnh và dữ liệu lên Firebase dạng NoSQL (Firestore)
+                File downloadsDir = new File(getExternalFilesDir(null), "DJI_Downloads");
+                File latestImage = null;
+                if (downloadsDir.exists() && downloadsDir.isDirectory()) {
+                    File[] files = downloadsDir.listFiles();
+                    if (files != null && files.length > 0) {
+                        latestImage = files[files.length - 1];
+                    }
+                }
+
+                String missionId = "mission_" + System.currentTimeMillis();
+                float alt = 10.0f;
+                try {
+                    if (edtWPAltitude != null && !edtWPAltitude.getText().toString().isEmpty()) {
+                        alt = Float.parseFloat(edtWPAltitude.getText().toString());
+                    }
+                } catch (NumberFormatException ignored) {}
+
+                final double area = fieldAreaHa;
+                final float altitude = alt;
+
+                if (latestImage != null && latestImage.exists()) {
+                    com.tri.djicontrol.firebase.FirebaseHelper.uploadImageToFirebase(latestImage, new com.tri.djicontrol.firebase.FirebaseHelper.UploadCallback() {
+                        @Override public void onProgress(int progress, double speedKBps) {}
+                        @Override
+                        public void onSuccess(String downloadUrl) {
+                            com.tri.djicontrol.firebase.FirebaseHelper.saveMissionDataToFirestore(missionId, area, altitude, 0, downloadUrl, new com.tri.djicontrol.firebase.FirebaseHelper.FirestoreCallback() {
+                                @Override public void onSuccess(String docId) {
+                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã xoá lộ trình và đồng bộ ảnh + NoSQL Firestore thành công!", Toast.LENGTH_LONG).show());
+                                }
+                                @Override public void onFailure(String error) {
+                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi lưu NoSQL Firestore: " + error, Toast.LENGTH_LONG).show());
+                                }
+                            });
+                        }
+                        @Override
+                        public void onFailure(String error) {
+                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi upload ảnh Firebase Storage: " + error, Toast.LENGTH_LONG).show());
+                        }
+                    });
+                } else {
+                    com.tri.djicontrol.firebase.FirebaseHelper.saveMissionDataToFirestore(missionId, area, altitude, 0, "", new com.tri.djicontrol.firebase.FirebaseHelper.FirestoreCallback() {
+                        @Override public void onSuccess(String docId) {
+                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã xoá lộ trình và đồng bộ NoSQL Firestore thành công!", Toast.LENGTH_LONG).show());
+                        }
+                        @Override public void onFailure(String error) {
+                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi lưu NoSQL Firestore: " + error, Toast.LENGTH_LONG).show());
+                        }
+                    });
+                }
+
+                Toast.makeText(MainActivity.this, "Đã xoá toàn bộ lộ trình!", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
             });
         }
 
@@ -1320,6 +1476,134 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             dialog.dismiss();
             startActivityForResult(intent, REQUEST_FIELD_MAP);
         });
+
+        Button btnLoadSavedField = dialog.findViewById(R.id.btnLoadSavedField);
+        if (btnLoadSavedField != null) {
+            btnLoadSavedField.setOnClickListener(view -> {
+                playSystemSound();
+                Toast.makeText(MainActivity.this, "Đang tải danh sách mảnh ruộng từ Firebase...", Toast.LENGTH_SHORT).show();
+
+                FirebaseHelper.getSavedFieldsFromFirestore(new FirebaseHelper.FieldsCallback() {
+                    @Override
+                    public void onSuccess(List<FirebaseHelper.SavedFieldItem> fields) {
+                        runOnUiThread(() -> {
+                            if (fields == null || fields.isEmpty()) {
+                                Toast.makeText(MainActivity.this, "Không có mảnh ruộng nào được lưu trên Firebase!", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            String[] fieldNames = new String[fields.size()];
+                            for (int i = 0; i < fields.size(); i++) {
+                                fieldNames[i] = fields.get(i).fieldName + " (" + String.format(Locale.US, "%.2f ha", fields.get(i).areaHa) + ")";
+                            }
+
+                            new android.app.AlertDialog.Builder(MainActivity.this)
+                                    .setTitle("CHỌN MẢNH RUỘNG ĐÃ LƯU")
+                                    .setItems(fieldNames, (dialogInterface, which) -> {
+                                        FirebaseHelper.SavedFieldItem selected = fields.get(which);
+
+                                        LinearLayout previewLayout = new LinearLayout(MainActivity.this);
+                                        previewLayout.setOrientation(LinearLayout.VERTICAL);
+                                        previewLayout.setPadding(30, 30, 30, 30);
+                                        previewLayout.setBackgroundColor(Color.parseColor("#20242A"));
+
+                                        android.widget.ImageView imgPreview = new android.widget.ImageView(MainActivity.this);
+                                        imgPreview.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 350));
+                                        imgPreview.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                                        imgPreview.setImageResource(android.R.drawable.ic_menu_gallery);
+                                        previewLayout.addView(imgPreview);
+
+                                        if (selected.imageUrl != null && !selected.imageUrl.isEmpty()) {
+                                            new Thread(() -> {
+                                                try {
+                                                    okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+                                                    okhttp3.Request request = new okhttp3.Request.Builder().url(selected.imageUrl).build();
+                                                    try (okhttp3.Response response = client.newCall(request).execute()) {
+                                                        if (response.isSuccessful() && response.body() != null) {
+                                                            byte[] bytes = response.body().bytes();
+                                                            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                                                            if (bmp != null) {
+                                                                runOnUiThread(() -> imgPreview.setImageBitmap(bmp));
+                                                            }
+                                                        }
+                                                    }
+                                                } catch (Exception ignored) {}
+                                            }).start();
+                                        }
+
+                                        TextView tvInfo = new TextView(MainActivity.this);
+                                        tvInfo.setTextColor(Color.WHITE);
+                                        tvInfo.setTextSize(14f);
+                                        tvInfo.setPadding(0, 20, 0, 10);
+                                        tvInfo.setText("Tên: " + selected.fieldName + "\nDiện tích: " + String.format(Locale.US, "%.2f ha", selected.areaHa));
+                                        previewLayout.addView(tvInfo);
+
+                                        new android.app.AlertDialog.Builder(MainActivity.this)
+                                                .setTitle("CHI TIẾT MẢNH RUỘNG")
+                                                .setView(previewLayout)
+                                                .setPositiveButton("HIỆN TRÊN BẢN ĐỒ & BAY", (d, w) -> {
+                                                    if (selected.latitudes != null && selected.longitudes != null && selected.latitudes.size() == 4) {
+                                                        fieldPoints.clear();
+                                                        sharedFieldPoints.clear();
+                                                        double cLat = 0, cLng = 0;
+                                                        for (int i = 0; i < 4; i++) {
+                                                            double lat = selected.latitudes.get(i);
+                                                            double lng = selected.longitudes.get(i);
+                                                            LatLng ll = new LatLng(lat, lng);
+                                                            fieldPoints.add(ll);
+                                                            sharedFieldPoints.add(ll);
+                                                            cLat += lat;
+                                                            cLng += lng;
+                                                        }
+                                                        fieldAreaHa = selected.areaHa;
+
+                                                        tvWPFieldStatus.setText("Đã xác định (" + selected.fieldName + ")");
+                                                        tvWPFieldArea.setText(String.format(Locale.US, "Diện tích: %.2f ha", fieldAreaHa));
+                                                        if (btnStartMapping != null) btnStartMapping.setVisibility(View.VISIBLE);
+
+                                                        updateMiniMapPolygon();
+
+                                                        LatLng center = new LatLng(cLat / 4, cLng / 4);
+                                                        if (miniMapLibreMap != null) {
+                                                            miniMapLibreMap.setCameraPosition(
+                                                                    new org.maplibre.android.camera.CameraPosition.Builder()
+                                                                            .target(center)
+                                                                            .zoom(15.0)
+                                                                            .build()
+                                                            );
+                                                        }
+
+                                                        Toast.makeText(MainActivity.this, "Đã hiển thị mảnh ruộng trên bản đồ: " + selected.fieldName, Toast.LENGTH_SHORT).show();
+                                                        dialog.dismiss();
+                                                    }
+                                                })
+                                                .setNegativeButton("XÓA KHỎI FIREBASE", (d, w) -> {
+                                                    FirebaseHelper.deleteFieldFromFirestore(selected.fieldId, new FirebaseHelper.FirestoreCallback() {
+                                                        @Override
+                                                        public void onSuccess(String docId) {
+                                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã xóa mảnh ruộng khỏi Firebase!", Toast.LENGTH_SHORT).show());
+                                                        }
+                                                        @Override
+                                                        public void onFailure(String error) {
+                                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi xóa: " + error, Toast.LENGTH_SHORT).show());
+                                                        }
+                                                    });
+                                                })
+                                                .setNeutralButton("ĐÓNG", null)
+                                                .show();
+                                    })
+                                    .setNegativeButton("ĐÓNG", null)
+                                    .show();
+                        });
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi tải danh sách: " + error, Toast.LENGTH_LONG).show());
+                    }
+                });
+            });
+        }
 
         dialog.show();
         if (dialog.getWindow() != null) {
@@ -1518,5 +1802,20 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 });
             }, 500);
         });
+    }
+
+    @SuppressWarnings({"MissingPermission"})
+    private void enableMiniMapLocationComponent(@NonNull Style loadedMapStyle) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+            if (miniMapLibreMap != null) {
+                LocationComponent locationComponent = miniMapLibreMap.getLocationComponent();
+                locationComponent.activateLocationComponent(LocationComponentActivationOptions.builder(this, loadedMapStyle).build());
+                locationComponent.setLocationComponentEnabled(true);
+                locationComponent.setCameraMode(CameraMode.NONE);
+                locationComponent.setRenderMode(RenderMode.COMPASS);
+            }
+        } else {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1003);
+        }
     }
 }

@@ -73,6 +73,7 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.10.0'
     implementation platform('com.google.firebase:firebase-bom:32.7.0')
     implementation 'com.google.firebase:firebase-storage'
+    implementation 'com.google.firebase:firebase-firestore'
 
     implementation ('com.dji:dji-sdk:4.17')
     compileOnly ('com.dji:dji-sdk-provided:4.17')

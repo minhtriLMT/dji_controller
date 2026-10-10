@@ -28,6 +28,11 @@ public class WaypointMissionManager {
         return null;
     }
 
+    public WaypointMissionState getCurrentState() {
+        WaypointMissionOperator operator = getOperator();
+        return operator != null ? operator.getCurrentState() : null;
+    }
+
     public void startMission(List<LocationCoordinate2D> coords, float altitude, MissionCallback callback) {
         WaypointMissionOperator operator = getOperator();
         if (operator == null) {
@@ -35,43 +40,53 @@ public class WaypointMissionManager {
             return;
         }
 
-        // Đã sửa lỗi truy cập .name() bằng cách dùng .equals(WaypointMissionState.READY_TO_UPLOAD) và .getName()
-        if (operator.getCurrentState() != null && !operator.getCurrentState().equals(WaypointMissionState.READY_TO_UPLOAD)) {
-            callback.onStatus("Nhiệm vụ đang chạy hoặc chưa sẵn sàng! Trạng thái: " + operator.getCurrentState().getName());
+        WaypointMissionState state = operator.getCurrentState();
+        if (state != null && state != WaypointMissionState.READY_TO_UPLOAD && state != WaypointMissionState.READY_TO_EXECUTE && state != WaypointMissionState.DISCONNECTED) {
+            Log.w(TAG, "Trạng thái mission hiện tại: " + state.getName() + ". Đang dừng mission cũ trước khi tạo mới...");
+            operator.stopMission(error -> buildAndUploadMission(operator, coords, altitude, callback));
             return;
         }
 
+        buildAndUploadMission(operator, coords, altitude, callback);
+    }
+
+    private void buildAndUploadMission(WaypointMissionOperator operator, List<LocationCoordinate2D> coords, float altitude, MissionCallback callback) {
         List<Waypoint> waypoints = new ArrayList<>();
         for (LocationCoordinate2D c : coords) {
             Waypoint wp = new Waypoint(c.getLatitude(), c.getLongitude(), altitude);
             wp.heading = 0;
-            wp.shootPhotoTimeInterval = 2.0f; // Chụp ảnh mỗi 2 giây tại mỗi điểm
+            wp.shootPhotoTimeInterval = 2.0f; // Chụp ảnh mỗi 2 giây tại mỗi điểm waypoint
             waypoints.add(wp);
         }
 
         WaypointMission.Builder builder = new WaypointMission.Builder()
                 .finishedAction(WaypointMissionFinishedAction.GO_HOME)
                 .flightPathMode(WaypointMissionFlightPathMode.CURVED)
-                .maxFlightSpeed(5.0f)
-                .autoFlightSpeed(3.0f)
+                .maxFlightSpeed(8.0f)
+                .autoFlightSpeed(4.0f)
                 .waypointList(waypoints)
                 .waypointCount(waypoints.size());
 
         WaypointMission mission = builder.build();
-        if (mission.checkParameters() != null) {
-            callback.onStatus("Lỗi tham số Mission: " + mission.checkParameters().getDescription());
+        DJIError paramError = mission.checkParameters();
+        if (paramError != null) {
+            callback.onStatus("Lỗi tham số Mission: " + paramError.getDescription());
             return;
         }
 
-        callback.onStatus("Đang tải nhiệm vụ lên Drone...");
-        operator.loadMission(mission);
+        callback.onStatus("Đang tải nhiệm vụ lên Drone (" + waypoints.size() + " điểm)...");
+        DJIError loadError = operator.loadMission(mission);
+        if (loadError != null) {
+            callback.onStatus("Lỗi load mission: " + loadError.getDescription());
+            return;
+        }
 
         operator.uploadMission(error -> {
             if (error == null) {
-                callback.onStatus("Upload thành công! Đang thực thi bay...");
+                callback.onStatus("Upload lộ trình thành công! Đang khởi động bay quét tự động...");
                 operator.startMission(startError -> {
                     if (startError == null) {
-                        callback.onStatus("Drone đã cất cánh bay quét tự động!");
+                        callback.onStatus("Drone đã cất cánh bay quét tự động thành công!");
                     } else {
                         callback.onStatus("Lỗi bắt đầu bay: " + startError.getDescription());
                     }
@@ -82,12 +97,40 @@ public class WaypointMissionManager {
         });
     }
 
+    public void pauseMission(MissionCallback callback) {
+        WaypointMissionOperator operator = getOperator();
+        if (operator != null) {
+            operator.pauseMission(error -> {
+                if (error == null && callback != null) {
+                    callback.onStatus("Đã tạm dừng nhiệm vụ bay!");
+                } else if (error != null && callback != null) {
+                    callback.onStatus("Lỗi tạm dừng bay: " + error.getDescription());
+                }
+            });
+        }
+    }
+
+    public void resumeMission(MissionCallback callback) {
+        WaypointMissionOperator operator = getOperator();
+        if (operator != null) {
+            operator.resumeMission(error -> {
+                if (error == null && callback != null) {
+                    callback.onStatus("Đã tiếp tục nhiệm vụ bay!");
+                } else if (error != null && callback != null) {
+                    callback.onStatus("Lỗi tiếp tục bay: " + error.getDescription());
+                }
+            });
+        }
+    }
+
     public void cancelMission(MissionCallback callback) {
         WaypointMissionOperator operator = getOperator();
         if (operator != null) {
             operator.stopMission(error -> {
                 if (error == null && callback != null) {
-                    callback.onStatus("Đã hủy nhiệm vụ bay!");
+                    callback.onStatus("Đã hủy và dừng nhiệm vụ bay!");
+                } else if (error != null && callback != null) {
+                    callback.onStatus("Lỗi hủy bay: " + error.getDescription());
                 }
             });
         }

@@ -277,7 +277,7 @@
         android:layout_alignParentEnd="true"
         android:orientation="horizontal"
         android:gravity="center"
-        android:background="#CC000000"
+        android:background="@android:color/transparent"
         android:elevation="20dp">
 
         <!-- CHỌN CHẾ ĐỘ -->
