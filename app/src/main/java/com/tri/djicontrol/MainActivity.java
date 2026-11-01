@@ -15,6 +15,10 @@ import org.maplibre.geojson.Feature;
 import org.maplibre.geojson.Point;
 
 
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.net.Uri;
+import android.provider.MediaStore;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import android.Manifest;
@@ -75,15 +79,23 @@ import com.tri.djicontrol.flight.FlightMissionManager;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.io.IOException;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Date;
+import java.text.SimpleDateFormat;
 
 import dji.common.camera.SettingsDefinitions;
+import dji.common.error.DJICameraError;
 import dji.common.error.DJIError;
 import dji.common.model.LocationCoordinate2D;
+import dji.common.util.CommonCallbacks;
 import dji.sdk.airlink.AirLink;
 import dji.sdk.battery.Battery;
 import dji.sdk.camera.Camera;
@@ -369,17 +381,61 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
             Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
             if (camera == null) return;
-            camera.startShootPhoto(djiError -> {
-                runOnUiThread(() -> {
+
+            if (isRecordingVideo) {
+                // Nếu đang quay video, chụp khung hình trực tiếp từ video stream
+                if (videoSurface != null && videoSurface.isAvailable()) {
+                    Bitmap currentFrame = videoSurface.getBitmap();
+                    if (currentFrame != null) {
+                        saveLiveFramePhoto(currentFrame);
+                    } else {
+                        Toast.makeText(MainActivity.this, "Không lấy được khung hình video!", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    Toast.makeText(MainActivity.this, "Giao diện video chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
+                }
+            } else {
+                // Nếu chưa quay video nhưng đang ở chế độ Video UI
+                // Bước 1: Thử chụp trực tiếp bằng phần cứng trước
+                camera.startShootPhoto(djiError -> {
                     if (djiError == null) {
                         photoCount++;
-                        tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
-                        Toast.makeText(MainActivity.this, "Đã chụp ảnh", Toast.LENGTH_SHORT).show();
+                        runOnUiThread(() -> {
+                            tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
+                            Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
+                        });
                     } else {
-                        Toast.makeText(MainActivity.this, "Chụp ảnh thất bại: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
+                        // Nếu camera báo lỗi do đang ở mode Video, tạm thời chuyển sang mode SHOOT_PHOTO để chụp
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang chụp ảnh...", Toast.LENGTH_SHORT).show());
+                        camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, setModeErr -> {
+                            if (setModeErr != null) {
+                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chuyển chế độ chụp: " + setModeErr.getDescription(), Toast.LENGTH_SHORT).show());
+                                return;
+                            }
+                            // Đợi 500ms cho phần cứng camera sẵn sàng ở chế độ SHOOT_PHOTO
+                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                camera.setShootPhotoMode(SettingsDefinitions.ShootPhotoMode.SINGLE, shootModeErr -> {
+                                    camera.startShootPhoto(shootErr -> {
+                                        if (shootErr == null) {
+                                            photoCount++;
+                                            runOnUiThread(() -> {
+                                                tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
+                                                Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
+                                            });
+                                        } else {
+                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chụp ảnh: " + shootErr.getDescription(), Toast.LENGTH_SHORT).show());
+                                        }
+                                        // Chờ 1200ms cho máy bay ghi xong file lên thẻ SD rồi chuyển lại mode RECORD_VIDEO
+                                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                                            camera.setMode(SettingsDefinitions.CameraMode.RECORD_VIDEO, null);
+                                        }, 1200);
+                                    });
+                                });
+                            }, 500);
+                        });
                     }
                 });
-            });
+            }
         });
 
         DJIConnectionManager.getInstance().setConnectionListener(status -> {
@@ -431,6 +487,50 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                 } else {
                                     sdStatusStr = "Thẻ: CHƯA CẮM";
                                 }
+                            });
+                            // --- THÊM ĐOẠN NÀY: Lắng nghe nút bấm chuyển chế độ trên tay cầm tay ---
+                            camera.setSystemStateCallback(systemState -> {
+                                if (systemState == null) return;
+
+                                SettingsDefinitions.CameraMode currentMode = systemState.getMode();
+                                boolean recording = systemState.isRecording();
+
+                                runOnUiThread(() -> {
+                                    if (currentMode == SettingsDefinitions.CameraMode.SHOOT_PHOTO) {
+                                        isCurrentModePhoto = true;
+
+                                        updateCameraModeUI(true, false);
+                                        btnVideoPhoto.setVisibility(View.GONE);
+                                        btnCaptureManual.setBackgroundResource(
+                                                R.drawable.bg_camera_shutter
+                                        );
+                                        btnCaptureManual.setContentDescription("Chụp ảnh");
+
+                                    } else if (currentMode == SettingsDefinitions.CameraMode.RECORD_VIDEO) {
+                                        isCurrentModePhoto = false;
+
+                                        updateCameraModeUI(false, false);
+                                        btnVideoPhoto.setVisibility(View.VISIBLE);
+                                        btnCaptureManual.setBackgroundResource(
+                                                R.drawable.bg_video_record
+                                        );
+                                        btnCaptureManual.setContentDescription(
+                                                recording ? "Dừng quay" : "Quay video"
+                                        );
+                                    }
+
+                                    if (recording != isRecordingVideo) {
+                                        isRecordingVideo = recording;
+
+                                        if (recording) {
+                                            startVideoTimer();
+                                            btnCaptureManual.setSelected(true);
+                                        } else {
+                                            stopVideoTimer();
+                                            btnCaptureManual.setSelected(false);
+                                        }
+                                    }
+                                });
                             });
                         }
 
@@ -595,118 +695,170 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     // ==========================================================
     // HÀM TẢI ẢNH TỪ DRONE VÀ LƯU VÀO ALBUM ĐIỆN THOẠI (DCIM)
     // ==========================================================
-    private void fetchAndDownloadLatestPhoto() {
+
+    private void fetchAndDownloadAllPhotos() {
         if (DJISDKManager.getInstance().getProduct() == null) {
             Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
+
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
         if (camera == null) {
             Toast.makeText(this, "Không tìm thấy Camera!", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        camera.setMode(SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD, djiError -> {
-            if (djiError != null && !djiError.getDescription().toLowerCase().contains("not supported")) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chuyển chế độ tải ảnh: " + djiError.getDescription(), Toast.LENGTH_SHORT).show());
+        Toast.makeText(this, "Đang quét danh sách ảnh từ máy bay...", Toast.LENGTH_SHORT).show();
+
+        Runnable startDownloadScan = () -> {
+            MediaManager mediaManager = camera.getMediaManager();
+            if (mediaManager == null) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
                 return;
             }
 
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                MediaManager mediaManager = camera.getMediaManager();
-                if (mediaManager == null) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
-                    return;
+            List<MediaFile> allMediaFiles = new ArrayList<>();
+            StorageAdapter dummyAdapter = new StorageAdapter(MainActivity.this, allMediaFiles);
+
+            loadMediaFilesForActiveStorage(camera, mediaManager, allMediaFiles, dummyAdapter, () -> {
+                List<MediaFile> photoList = new ArrayList<>();
+                for (MediaFile file : allMediaFiles) {
+                    if (file != null) {
+                        MediaFile.MediaType type = file.getMediaType();
+                        if (type != MediaFile.MediaType.MOV && type != MediaFile.MediaType.MP4) {
+                            photoList.add(file);
+                        }
+                    }
                 }
 
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang đồng bộ thẻ nhớ...", Toast.LENGTH_SHORT).show());
+                if (!photoList.isEmpty()) {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Tìm thấy " + photoList.size() + " tấm ảnh!", Toast.LENGTH_LONG).show());
+                    downloadPhotoListRecursive(camera, photoList, 0);
+                } else {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không tìm thấy file ảnh nào!", Toast.LENGTH_LONG).show());
+                }
+            });
+        };
 
-                mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, refreshError -> {
-                    if (refreshError == null) {
-                        List<MediaFile> fileList = mediaManager.getSDCardFileListSnapshot();
-                        if (fileList != null && !fileList.isEmpty()) {
-                            MediaFile latestMedia = null;
-                            for (int i = fileList.size() - 1; i >= 0; i--) {
-                                if (fileList.get(i).getMediaType() == MediaFile.MediaType.JPEG ||
-                                        fileList.get(i).getMediaType() == MediaFile.MediaType.TIFF) {
-                                    latestMedia = fileList.get(i);
-                                    break;
-                                }
-                            }
+        switchCameraToMediaDownloadMode(camera, startDownloadScan);
+    }
 
-                            if (latestMedia != null) {
-                                final MediaFile targetMedia = latestMedia;
-                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Bắt đầu tải ảnh: " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
 
-                                // LƯU VÀO THƯ MỤC CÔNG KHAI DCIM ĐỂ ALBUM ĐIỆN THOẠI NHẬN DIỆN
-                                File destDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "DJI_Photos");
-                                if (!destDir.exists()) {
-                                    destDir.mkdirs();
-                                }
+    // Hàm tải tuần tự từng ảnh trong danh sách về Album điện thoại
+    private void downloadPhotoListRecursive(Camera camera, List<MediaFile> photoList, int index) {
+        if (index >= photoList.size()) {
+            runOnUiThread(() -> {
+                Toast.makeText(MainActivity.this, "ĐÃ TẢI XONG TOÀN BỘ " + photoList.size() + " ẢNH VỀ ALBUM!", Toast.LENGTH_LONG).show();
+                camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, null);
+            });
+            return;
+        }
 
-                                targetMedia.fetchFileData(destDir, targetMedia.getFileName(), new DownloadListener<String>() {
-                                    @Override
-                                    public void onStart() {}
+        MediaFile targetMedia = photoList.get(index);
+        File destDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "DJI_Photos");
+        if (!destDir.exists()) destDir.mkdirs();
 
-                                    @Override
-                                    public void onRateUpdate(long total, long current, long persize) {
-                                        double speedKB = persize / 1024.0;
-                                        if (speedKB >= 1024.0) {
-                                            downloadSpeedText = String.format(Locale.US, "DL: %.2f MB/s", speedKB / 1024.0);
-                                        } else {
-                                            downloadSpeedText = String.format(Locale.US, "DL: %.1f KB/s", speedKB);
-                                        }
-                                    }
+        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang tải ảnh (" + (index + 1) + "/" + photoList.size() + "): " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
 
-                                    @Override
-                                    public void onProgress(long total, long current) {
-                                        int percent = (int) (((double) current / total) * 100);
-                                        runOnUiThread(() -> {
-                                            if (tvSpeedStats != null) {
-                                                tvSpeedStats.setText(String.format(Locale.US, "Đang tải: %d%% | %s", percent, downloadSpeedText));
-                                            }
-                                        });
-                                    }
+        targetMedia.fetchFileData(destDir, targetMedia.getFileName(), new DownloadListener<String>() {
+            @Override
+            public void onStart() {}
+            @Override
+            public void onRateUpdate(long total, long current, long persize) {}
+            @Override
+            public void onProgress(long total, long current) {}
 
-                                    @Override
-                                    public void onSuccess(String filePath) {
-                                        downloadSpeedText = "DL: 0 KB/s";
-                                        updateNetworkSpeedUI();
+            @Override
+            public void onSuccess(String filePath) {
+                MediaScannerConnection.scanFile(MainActivity.this, new String[]{filePath}, new String[]{"image/jpeg", "image/tiff"}, null);
+                // Tải tiếp tấm tiếp theo
+                downloadPhotoListRecursive(camera, photoList, index + 1);
+            }
 
-                                        // QUÉT FILE ĐỂ CẬP NHẬT VÀO BỘ SƯU TẬP (ALBUM ẢNH)
-                                        MediaScannerConnection.scanFile(MainActivity.this,
-                                                new String[]{filePath},
-                                                new String[]{"image/jpeg", "image/tiff", "video/mp4"},
-                                                (path, uri) -> {});
+            @Override
+            public void onFailure(DJIError error) {
+                // Bỏ qua tấm lỗi và tiếp tục tải tấm sau
+                downloadPhotoListRecursive(camera, photoList, index + 1);
+            }
 
-                                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã lưu vào Album điện thoại!", Toast.LENGTH_LONG).show());
-                                        camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, null);
+            @Override
+            public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
+        });
+    }
 
-                                        File downloadedFile = new File(filePath);
-                                        uploadPhotoToServer(downloadedFile, "https://your-server-api.com/api/upload");
-                                    }
+    // Hàm tải hàng loạt các file (ảnh & video) đã chọn từ drone về Bộ sưu tập điện thoại
+    private void downloadBatchSelectedFilesRecursive(List<MediaFile> fileList, int index, int successCount) {
+        if (fileList == null || index >= fileList.size()) {
+            runOnUiThread(() -> {
+                int total = (fileList != null) ? fileList.size() : 0;
+                Toast.makeText(
+                        MainActivity.this,
+                        "ĐÃ TẢI XONG TOÀN BỘ " + successCount + "/" + total + " FILE VÀO BỘ SỰ TẬP!",
+                        Toast.LENGTH_LONG
+                ).show();
+            });
+            return;
+        }
 
-                                    @Override
-                                    public void onFailure(DJIError error) {
-                                        downloadSpeedText = "DL: 0 KB/s";
-                                        updateNetworkSpeedUI();
-                                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi tải ảnh: " + error.getDescription(), Toast.LENGTH_SHORT).show());
-                                    }
+        MediaFile mediaFile = fileList.get(index);
+        if (mediaFile == null || mediaFile.getFileName() == null) {
+            downloadBatchSelectedFilesRecursive(fileList, index + 1, successCount);
+            return;
+        }
 
-                                    @Override
-                                    public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
-                                });
-                            } else {
-                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không tìm thấy file ảnh nào trên thẻ nhớ!", Toast.LENGTH_SHORT).show());
-                            }
-                        } else {
-                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Thẻ nhớ trống!", Toast.LENGTH_SHORT).show());
-                        }
-                    } else {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không thể làm mới thẻ nhớ: " + refreshError.getDescription(), Toast.LENGTH_SHORT).show());
-                    }
-                });
-            }, 500);
+        MediaFile.MediaType type = mediaFile.getMediaType();
+        boolean isVideo = (type == MediaFile.MediaType.MOV || type == MediaFile.MediaType.MP4);
+
+        File destDir = new File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                isVideo ? "DJI_Videos" : "DJI_Photos"
+        );
+        if (!destDir.exists()) {
+            boolean created = destDir.mkdirs();
+            if (!created && !destDir.exists()) {
+                destDir = new File(getExternalFilesDir(null), "DJI_Downloads");
+                if (!destDir.exists()) destDir.mkdirs();
+            }
+        }
+
+        final File finalDestDir = destDir;
+        final String fileName = mediaFile.getFileName();
+
+        runOnUiThread(() -> Toast.makeText(
+                MainActivity.this,
+                "Đang tải (" + (index + 1) + "/" + fileList.size() + "): " + fileName,
+                Toast.LENGTH_SHORT
+        ).show());
+
+        mediaFile.fetchFileData(finalDestDir, fileName, new DownloadListener<String>() {
+            @Override public void onStart() {}
+            @Override public void onRateUpdate(long total, long current, long persize) {}
+            @Override public void onProgress(long total, long current) {}
+
+            @Override
+            public void onSuccess(String filePath) {
+                if (filePath != null) {
+                    MediaScannerConnection.scanFile(
+                            MainActivity.this,
+                            new String[]{filePath},
+                            new String[]{isVideo ? "video/*" : "image/*"},
+                            null
+                    );
+                }
+                downloadBatchSelectedFilesRecursive(fileList, index + 1, successCount + 1);
+            }
+
+            @Override
+            public void onFailure(DJIError error) {
+                runOnUiThread(() -> Toast.makeText(
+                        MainActivity.this,
+                        "Lỗi tải " + fileName + ": " + (error != null ? error.getDescription() : "Thất bại"),
+                        Toast.LENGTH_SHORT
+                ).show());
+                downloadBatchSelectedFilesRecursive(fileList, index + 1, successCount);
+            }
+
+            @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
         });
     }
 
@@ -803,6 +955,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void setupCameraModeSwipe() {
         updateCameraModeUI(true, false);
+        // THÊM 2 DÒNG NÀY: Cho phép lấy tay chạm trực tiếp vào chữ Video / Ảnh
+        tvCameraVideo.setOnClickListener(v -> selectCameraMode(false));
+        tvCameraPhoto.setOnClickListener(v -> selectCameraMode(true));
+
         cameraModePicker.setOnTouchListener((v, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
@@ -1292,21 +1448,32 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         .build()
         );
 
+
         locationComponent.setLocationComponentEnabled(true);
 
         locationComponent.setRenderMode(
                 RenderMode.COMPASS
         );
 
+// Tự theo dõi vị trí điện thoại và zoom gần
         locationComponent.setCameraMode(
                 CameraMode.TRACKING
         );
 
-        // Lấy vị trí điện thoại gần nhất nếu đã có
+// Zoom mặc định của bản đồ nhỏ
+        miniMapLibreMap.setCameraPosition(
+                new org.maplibre.android.camera.CameraPosition.Builder()
+                        .zoom(18.0)
+                        .build()
+        );
+
+// Lấy vị trí điện thoại gần nhất nếu đã có
         Location lastLocation =
                 locationComponent.getLastKnownLocation();
 
-        if (lastLocation != null) {
+        if (lastLocation != null
+                && lastLocation.getLatitude() != 0
+                && lastLocation.getLongitude() != 0) {
 
             miniMapLibreMap.setCameraPosition(
                     new org.maplibre.android.camera.CameraPosition.Builder()
@@ -1320,6 +1487,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             .build()
             );
         }
+
     }
 
 
@@ -1442,88 +1610,469 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (codecManager != null) codecManager.sendDataToDecoder(videoBuffer, size);
     };
 
+
+
     private void showStorageDialog() {
         Dialog dialog = new Dialog(this);
         dialog.setContentView(R.layout.dialog_storage);
 
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            dialog.getWindow().setBackgroundDrawableResource(
+                    android.R.color.transparent
+            );
+
             dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.70),
-                    (int) (getResources().getDisplayMetrics().heightPixels * 0.80)
+                    (int) (getResources().getDisplayMetrics().widthPixels * 0.75),
+                    (int) (getResources().getDisplayMetrics().heightPixels * 0.85)
             );
         }
 
         GridView gridStorage = dialog.findViewById(R.id.gridStorage);
         Button btnCloseStorage = dialog.findViewById(R.id.btnCloseStorage);
+        View layoutHeaderNormal = dialog.findViewById(R.id.layoutHeaderNormal);
+        View layoutHeaderSelection = dialog.findViewById(R.id.layoutHeaderSelection);
+        Button btnCancelSelection = dialog.findViewById(R.id.btnCancelSelection);
+        TextView tvSelectionCount = dialog.findViewById(R.id.tvSelectionCount);
+        Button btnDownloadSelected = dialog.findViewById(R.id.btnDownloadSelected);
+        Button btnDeleteSelected = dialog.findViewById(R.id.btnDeleteSelected);
+
         tvSpeedStats = dialog.findViewById(R.id.tvSpeedStats);
+
         List<MediaFile> storageFiles = new ArrayList<>();
-        StorageAdapter adapter = new StorageAdapter(MainActivity.this, storageFiles);
+
+        StorageAdapter adapter = new StorageAdapter(
+                MainActivity.this,
+                storageFiles
+        );
+
         gridStorage.setAdapter(adapter);
 
-        btnCloseStorage.setOnClickListener(v -> {
-            if (DJISDKManager.getInstance().getProduct() != null) {
-                Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
-                if (camera != null) {
-                    SettingsDefinitions.CameraMode mode;
-                    if (isCurrentModePhoto) mode = SettingsDefinitions.CameraMode.SHOOT_PHOTO;
-                    else mode = SettingsDefinitions.CameraMode.RECORD_VIDEO;
-                    camera.setMode(mode, null);
+        adapter.setOnSelectionListener(new StorageAdapter.OnSelectionListener() {
+            @Override
+            public void onSelectionChanged(int selectedCount) {
+                if (tvSelectionCount != null) {
+                    tvSelectionCount.setText("Đã chọn: " + selectedCount);
+                }
+                if (btnDownloadSelected != null) {
+                    btnDownloadSelected.setText("TẢI VỀ (" + selectedCount + ")");
+                }
+                if (btnDeleteSelected != null) {
+                    btnDeleteSelected.setText("XÓA (" + selectedCount + ")");
                 }
             }
+
+            @Override
+            public void onSelectionModeChanged(boolean isSelectionMode) {
+                if (layoutHeaderNormal != null && layoutHeaderSelection != null) {
+                    layoutHeaderNormal.setVisibility(isSelectionMode ? View.GONE : View.VISIBLE);
+                    layoutHeaderSelection.setVisibility(isSelectionMode ? View.VISIBLE : View.GONE);
+                }
+            }
+        });
+
+        if (btnCancelSelection != null) {
+            btnCancelSelection.setOnClickListener(v -> adapter.setSelectionMode(false));
+        }
+
+        if (btnDownloadSelected != null) {
+            btnDownloadSelected.setOnClickListener(v -> {
+                Set<MediaFile> selected = adapter.getSelectedFiles();
+                if (selected.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để tải về!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                List<MediaFile> toDownload = new ArrayList<>(selected);
+                adapter.clearSelection();
+                adapter.setSelectionMode(false);
+
+                Toast.makeText(MainActivity.this, "Bắt đầu tải " + toDownload.size() + " file về Bộ sưu tập...", Toast.LENGTH_SHORT).show();
+                downloadBatchSelectedFilesRecursive(toDownload, 0, 0);
+            });
+        }
+
+        if (btnDeleteSelected != null) {
+            btnDeleteSelected.setOnClickListener(v -> {
+                Set<MediaFile> selected = adapter.getSelectedFiles();
+                if (selected.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để xóa!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle("Xác nhận xóa")
+                        .setMessage("Bạn có chắc chắn muốn xóa " + selected.size() + " file đã chọn khỏi máy bay?")
+                        .setPositiveButton("XÓA", (dialogInterface, i) -> {
+                            Aircraft currentAircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
+                            if (currentAircraft == null || currentAircraft.getCamera() == null || currentAircraft.getCamera().getMediaManager() == null) {
+                                Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            MediaManager mediaManager = currentAircraft.getCamera().getMediaManager();
+                            List<MediaFile> toDelete = new ArrayList<>(selected);
+
+                            Toast.makeText(MainActivity.this, "Đang xóa " + toDelete.size() + " file khỏi máy bay...", Toast.LENGTH_SHORT).show();
+
+                            mediaManager.deleteFiles(toDelete, new CommonCallbacks.CompletionCallbackWithTwoParam<List<MediaFile>, DJICameraError>() {
+                                @Override
+                                public void onSuccess(List<MediaFile> failedFiles, DJICameraError error) {
+                                    runOnUiThread(() -> {
+                                        int failedCount = (failedFiles != null) ? failedFiles.size() : 0;
+                                        int successCount = toDelete.size() - failedCount;
+
+                                        for (MediaFile f : toDelete) {
+                                            if (failedFiles == null || !failedFiles.contains(f)) {
+                                                storageFiles.remove(f);
+                                            }
+                                        }
+
+                                        adapter.clearSelection();
+                                        adapter.setSelectionMode(false);
+                                        adapter.notifyDataSetChanged();
+
+                                        if (error == null && failedCount == 0) {
+                                            Toast.makeText(MainActivity.this, "Đã xóa thành công " + successCount + " file!", Toast.LENGTH_LONG).show();
+                                        } else {
+                                            Toast.makeText(MainActivity.this, "Đã xóa " + successCount + " file. Thất bại: " + failedCount + " file", Toast.LENGTH_LONG).show();
+                                        }
+                                    });
+                                }
+
+                                @Override
+                                public void onFailure(DJIError djiError) {
+                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi xóa file: " + (djiError != null ? djiError.getDescription() : "Thất bại"), Toast.LENGTH_LONG).show());
+                                }
+                            });
+                        })
+                        .setNegativeButton("HỦY", null)
+                        .show();
+            });
+        }
+
+        // Đóng giao diện kho lưu trữ
+        btnCloseStorage.setOnClickListener(v -> {
+
+            if (DJISDKManager.getInstance().getProduct() != null) {
+
+                Aircraft aircraft = (Aircraft) DJISDKManager
+                        .getInstance()
+                        .getProduct();
+
+                Camera closeCamera = aircraft.getCamera();
+
+                if (closeCamera != null) {
+
+                    SettingsDefinitions.CameraMode mode;
+
+                    if (isCurrentModePhoto) {
+                        mode = SettingsDefinitions.CameraMode.SHOOT_PHOTO;
+                    } else {
+                        mode = SettingsDefinitions.CameraMode.RECORD_VIDEO;
+                    }
+
+                    closeCamera.setMode(mode, null);
+                }
+            }
+
             tvSpeedStats = null;
             dialog.dismiss();
         });
 
         dialog.show();
 
+        // Kiểm tra kết nối Drone
         if (DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(MainActivity.this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(
+                    MainActivity.this,
+                    "Chưa kết nối Drone!",
+                    Toast.LENGTH_SHORT
+            ).show();
             return;
         }
 
-        Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
+        Aircraft aircraft = (Aircraft) DJISDKManager
+                .getInstance()
+                .getProduct();
+
+        Camera camera = aircraft.getCamera();
+
         if (camera == null) {
-            Toast.makeText(MainActivity.this, "Không tìm thấy Camera!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(
+                    MainActivity.this,
+                    "Không tìm thấy Camera!",
+                    Toast.LENGTH_SHORT
+            ).show();
             return;
         }
 
-        camera.setMode(SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD, djiError -> {
-            if (djiError != null && !djiError.getDescription().toLowerCase().contains("not supported")) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi mở bộ nhớ: " + djiError.getDescription(), Toast.LENGTH_SHORT).show());
+        // 1. Chuyển sang chế độ MEDIA_DOWNLOAD
+        Runnable startScan = () -> {
+            MediaManager mediaManager = camera.getMediaManager();
+            if (mediaManager == null) {
+                retryGetMediaManager(camera, storageFiles, adapter, 1);
                 return;
             }
 
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                MediaManager mediaManager = camera.getMediaManager();
-                if (mediaManager == null) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
-                    return;
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang mở thẻ nhớ và quét toàn bộ file trên drone...", Toast.LENGTH_SHORT).show());
+
+            // 3. Thực hiện quét
+            loadMediaFilesForActiveStorage(camera, mediaManager, storageFiles, adapter, null);
+        };
+
+        switchCameraToMediaDownloadMode(camera, startScan);
+    }
+
+    private void retryGetMediaManager(Camera camera, List<MediaFile> storageFiles, StorageAdapter adapter, int attempt) {
+        if (attempt > 3) {
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
+            return;
+        }
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            if (camera != null && camera.getMediaManager() != null) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang mở thẻ nhớ và quét toàn bộ file trên drone...", Toast.LENGTH_SHORT).show());
+                loadMediaFilesForActiveStorage(camera, camera.getMediaManager(), storageFiles, adapter, null);
+            } else {
+                retryGetMediaManager(camera, storageFiles, adapter, attempt + 1);
+            }
+        }, 800);
+    }
+
+    private void switchCameraToMediaDownloadMode(Camera camera, Runnable onReady) {
+        if (camera == null) {
+            onReady.run();
+            return;
+        }
+
+        camera.getMode(new CommonCallbacks.CompletionCallbackWith<SettingsDefinitions.CameraMode>() {
+            @Override
+            public void onSuccess(SettingsDefinitions.CameraMode currentMode) {
+                if (currentMode == SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD) {
+                    new Handler(Looper.getMainLooper()).postDelayed(onReady, 300);
+                } else {
+                    boolean isSupported = true;
+                    try {
+                        isSupported = camera.isMediaDownloadModeSupported();
+                    } catch (Exception ignored) {}
+
+                    if (isSupported) {
+                        camera.setMode(SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD, djiError -> {
+                            if (djiError == null) {
+                                new Handler(Looper.getMainLooper()).postDelayed(onReady, 1000);
+                            } else {
+                                runOnUiThread(() -> Toast.makeText(
+                                        MainActivity.this,
+                                        "Chuyển chế độ Media: " + djiError.getDescription(),
+                                        Toast.LENGTH_SHORT
+                                ).show());
+                                new Handler(Looper.getMainLooper()).postDelayed(onReady, 1000);
+                            }
+                        });
+                    } else {
+                        new Handler(Looper.getMainLooper()).postDelayed(onReady, 500);
+                    }
                 }
+            }
 
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang tải danh sách ảnh/video...", Toast.LENGTH_SHORT).show());
-
-                mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, refreshError -> {
-                    if (refreshError != null) {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi đọc thẻ nhớ: " + refreshError.getDescription(), Toast.LENGTH_SHORT).show());
-                        return;
-                    }
-
-                    List<MediaFile> fileList = mediaManager.getSDCardFileListSnapshot();
-                    if (fileList == null || fileList.isEmpty()) {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Thẻ nhớ chưa có ảnh/video!", Toast.LENGTH_SHORT).show());
-                        return;
-                    }
-
-                    storageFiles.clear();
-                    storageFiles.addAll(fileList);
-
-                    runOnUiThread(() -> {
-                        adapter.notifyDataSetChanged();
-                        Toast.makeText(MainActivity.this, "Đã tìm thấy " + storageFiles.size() + " file", Toast.LENGTH_SHORT).show();
-                    });
+            @Override
+            public void onFailure(DJIError djiError) {
+                camera.setMode(SettingsDefinitions.CameraMode.MEDIA_DOWNLOAD, error -> {
+                    new Handler(Looper.getMainLooper()).postDelayed(onReady, 1000);
                 });
-            }, 500);
+            }
         });
     }
+
+    // Quét toàn bộ file trên thẻ nhớ SD và bộ nhớ trong máy bay DJI
+    private void loadMediaFilesForActiveStorage(
+            Camera camera,
+            MediaManager mediaManager,
+            List<MediaFile> storageFiles,
+            StorageAdapter adapter,
+            Runnable onComplete
+    ) {
+        if (camera == null || mediaManager == null) {
+            Toast.makeText(MainActivity.this, "Camera hoặc MediaManager không khả dụng!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final boolean[] isFinished = {false};
+        final Handler handler = new Handler(Looper.getMainLooper());
+
+        final Runnable finishAndPopulate = () -> {
+            if (!isFinished[0]) {
+                isFinished[0] = true;
+
+                Set<String> fileNames = new HashSet<>();
+                List<MediaFile> allFiles = new ArrayList<>();
+
+                // 1. Quét Thẻ SD (SDCARD)
+                List<MediaFile> sdList = mediaManager.getSDCardFileListSnapshot();
+                if (sdList != null) {
+                    for (MediaFile f : sdList) {
+                        if (f != null && f.getFileName() != null && !f.getFileName().isEmpty() && fileNames.add(f.getFileName())) {
+                            allFiles.add(f);
+                        }
+                    }
+                }
+
+                // 2. Quét Bộ nhớ trong (INTERNAL_STORAGE)
+                List<MediaFile> intList = mediaManager.getInternalStorageFileListSnapshot();
+                if (intList != null) {
+                    for (MediaFile f : intList) {
+                        if (f != null && f.getFileName() != null && !f.getFileName().isEmpty() && fileNames.add(f.getFileName())) {
+                            allFiles.add(f);
+                        }
+                    }
+                }
+
+                finalizeMediaFiles(allFiles, storageFiles, adapter, onComplete);
+            }
+        };
+
+        // Safety timeout tối đa 8 giây
+        handler.postDelayed(finishAndPopulate, 8000);
+
+        // Bước 1: Quét thẻ nhớ SD trước
+        mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, sdErr -> {
+            // Bước 2: Quét tiếp bộ nhớ trong (INTERNAL_STORAGE) bất kể SDCARD lỗi hay không
+            mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.INTERNAL_STORAGE, intErr -> {
+                // Nếu ít nhất 1 vị trí quét thành công hoặc đã lấy được dữ liệu snapshot
+                if (sdErr == null || intErr == null || getTotalMediaCount(mediaManager) > 0) {
+                    handler.post(finishAndPopulate);
+                } else {
+                    // Dự phòng cho drone đời cũ không hỗ trợ refreshFileListOfStorageLocation
+                    mediaManager.refreshFileList(genErr -> {
+                        handler.postDelayed(finishAndPopulate, 1500);
+                    });
+                }
+            });
+        });
+    }
+
+    private int getTotalMediaCount(MediaManager mediaManager) {
+        if (mediaManager == null) return 0;
+        Set<String> fileNames = new HashSet<>();
+
+        List<MediaFile> sdList = mediaManager.getSDCardFileListSnapshot();
+        if (sdList != null) {
+            for (MediaFile f : sdList) {
+                if (f != null && f.getFileName() != null && !f.getFileName().isEmpty()) {
+                    fileNames.add(f.getFileName());
+                }
+            }
+        }
+
+        List<MediaFile> intList = mediaManager.getInternalStorageFileListSnapshot();
+        if (intList != null) {
+            for (MediaFile f : intList) {
+                if (f != null && f.getFileName() != null && !f.getFileName().isEmpty()) {
+                    fileNames.add(f.getFileName());
+                }
+            }
+        }
+
+        return fileNames.size();
+    }
+
+    private void finalizeMediaFiles(
+            List<MediaFile> allFiles,
+            List<MediaFile> storageFiles,
+            StorageAdapter adapter,
+            Runnable onComplete
+    ) {
+        Collections.sort(allFiles, (f1, f2) -> Long.compare(f2.getTimeCreated(), f1.getTimeCreated()));
+
+        runOnUiThread(() -> {
+            storageFiles.clear();
+            if (!allFiles.isEmpty()) {
+                storageFiles.addAll(allFiles);
+                adapter.notifyDataSetChanged();
+                Toast.makeText(
+                        MainActivity.this,
+                        "ĐÃ ĐỒNG BỘ XONG " + storageFiles.size() + " FILE!",
+                        Toast.LENGTH_LONG
+                ).show();
+            } else {
+                adapter.notifyDataSetChanged();
+                Toast.makeText(
+                        MainActivity.this,
+                        "Bộ nhớ máy bay đang trống (0 file)!",
+                        Toast.LENGTH_LONG
+                ).show();
+            }
+
+            if (onComplete != null) {
+                onComplete.run();
+            }
+        });
+    }
+
+    private void saveLiveFramePhoto(Bitmap bitmap) {
+        if (bitmap == null) return;
+        new Thread(() -> {
+            try {
+                String fileName = "PHOTO_IN_VIDEO_" + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date()) + ".jpg";
+                boolean savedSuccessfully = false;
+                String savedFilePath = null;
+
+                ContentResolver resolver = getContentResolver();
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                values.put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg");
+                values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/DJI_Photos");
+
+                Uri collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                Uri imageUri = resolver.insert(collection, values);
+                if (imageUri != null) {
+                    try (OutputStream out = resolver.openOutputStream(imageUri)) {
+                        if (out != null) {
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
+                            out.flush();
+                            savedSuccessfully = true;
+                        }
+                    } catch (Exception e) {
+                        savedSuccessfully = false;
+                    }
+                }
+
+                // Nếu MediaStore không thành công, dùng fallback file hệ thống
+                if (!savedSuccessfully) {
+                    File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "DJI_Photos");
+                    if (!dir.exists()) {
+                        boolean created = dir.mkdirs();
+                        if (!created && !dir.exists()) {
+                            dir = new File(getExternalFilesDir(null), "DJI_Photos");
+                            if (!dir.exists()) dir.mkdirs();
+                        }
+                    }
+                    File file = new File(dir, fileName);
+                    try (FileOutputStream out = new FileOutputStream(file)) {
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 100, out);
+                        out.flush();
+                        savedSuccessfully = true;
+                        savedFilePath = file.getAbsolutePath();
+                    } catch (Exception e) {
+                        savedSuccessfully = false;
+                    }
+                }
+
+                if (savedSuccessfully) {
+                    if (savedFilePath != null) {
+                        MediaScannerConnection.scanFile(MainActivity.this, new String[]{savedFilePath}, new String[]{"image/jpeg"}, null);
+                    }
+                    photoCount++;
+                    runOnUiThread(() -> {
+                        tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
+                        Toast.makeText(MainActivity.this, "Đã lưu ảnh chụp từ video vào Bộ sưu tập!", Toast.LENGTH_SHORT).show();
+                    });
+                } else {
+                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không thể lưu ảnh vào bộ nhớ!", Toast.LENGTH_SHORT).show());
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi lưu ảnh: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+            }
+        }).start();
+    }
+
 }

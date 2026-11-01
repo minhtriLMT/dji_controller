@@ -7,8 +7,9 @@
     android:background="#20242A"
     android:padding="8dp">
 
-    <!-- TIÊU ĐỀ -->
+    <!-- TIÊU ĐỀ THƯỜNG -->
     <LinearLayout
+        android:id="@+id/layoutHeaderNormal"
         android:layout_width="match_parent"
         android:layout_height="40dp"
         android:orientation="horizontal"
@@ -34,6 +35,66 @@
             android:text="X"
             android:textColor="#FFFFFF"
             android:textSize="13sp" />
+
+    </LinearLayout>
+
+    <!-- HEADER CHẾ ĐỘ CHỌN NHIỀU (SELECTION MODE) -->
+    <LinearLayout
+        android:id="@+id/layoutHeaderSelection"
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:visibility="gone">
+
+        <Button
+            android:id="@+id/btnCancelSelection"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:minWidth="0dp"
+            android:paddingLeft="12dp"
+            android:paddingRight="12dp"
+            android:text="HỦY"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvSelectionCount"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="Đã chọn: 0"
+            android:textColor="#FFEB3B"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnDownloadSelected"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:minWidth="0dp"
+            android:layout_marginEnd="6dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:text="TẢI VỀ"
+            android:backgroundTint="#4CAF50"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnDeleteSelected"
+            android:layout_width="wrap_content"
+            android:layout_height="34dp"
+            android:minWidth="0dp"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:text="XÓA"
+            android:backgroundTint="#F44336"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
     </LinearLayout>
 

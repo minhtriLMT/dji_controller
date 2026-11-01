@@ -4,7 +4,7 @@ import android.content.Context;
 import android.widget.Toast;
 import java.io.File;
 
-public class FirebaseHelper {
+public class  FirebaseHelper {
 
     // Đã thêm biến String metaInfo vào tham số
     public static void uploadFileToFirebase(Context context, File localFile, String metaInfo) {
