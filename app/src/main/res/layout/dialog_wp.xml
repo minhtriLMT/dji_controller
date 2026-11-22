@@ -1,262 +1,436 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Hộp thoại THIẾT LẬP LỘ TRÌNH (bay quét WP). Thiết kế cho màn hình ngang: 2 cột. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#20242A"
-    android:fillViewport="true">
+    android:background="@drawable/bg_cf_dialog"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="12dp">
 
+    <!-- ===== TIÊU ĐỀ ===== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="12dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <!-- TIÊU ĐỀ -->
+
         <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="45dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
 
             <TextView
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:gravity="center_vertical"
-                android:text="THIẾT LẬP LỘ TRÌNH"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Thiết lập lộ trình"
                 android:textColor="#FFFFFF"
-                android:textSize="16sp"
+                android:textSize="17sp"
                 android:textStyle="bold" />
 
-            <Button
-                android:id="@+id/btnCloseWP"
-                android:layout_width="45dp"
-                android:layout_height="34dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:padding="0dp"
-                android:text="X"
-                android:textColor="#FFFFFF"
-                android:textSize="13sp" />
-
-        </LinearLayout>
-
-        <!-- KHU VỰC GIÁM SÁT -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="30dp"
-            android:gravity="center_vertical"
-            android:text="KHU VỰC GIÁM SÁT"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="120dp"
-            android:orientation="vertical"
-            android:background="#30343B"
-            android:padding="10dp">
-
             <TextView
-                android:id="@+id/tvWPFieldStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Chưa xác định khu vực"
-                android:textColor="#FFFFFF"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/tvWPFieldArea"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="Diện tích: 0.00 ha"
-                android:textColor="#BDBDBD"
-                android:textSize="11sp" />
-
-            <Button
-                android:id="@+id/btnEditWPField"
                 android:layout_width="wrap_content"
-                android:layout_height="34dp"
-                android:layout_marginTop="8dp"
-                android:minHeight="0dp"
-                android:text="CHỌN / CHỈNH KHU VỰC"
-                android:textSize="9sp" />
-
+                android:layout_height="wrap_content"
+                android:text="Bay quét tự động theo lưới zigzag phủ kín ruộng"
+                android:textColor="#9AA0A6"
+                android:textSize="11sp" />
         </LinearLayout>
 
-        <!-- THÔNG SỐ BAY -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="30dp"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical"
-            android:text="THÔNG SỐ BAY"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCloseWP"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:background="@drawable/bg_wp_close"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:stateListAnimator="@null"
+            android:text="✕"
+            android:textColor="#E8EAED"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="10dp"
+        android:layout_marginBottom="10dp"
+        android:background="#1FFFFFFF" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fadeScrollbars="true"
+        android:fillViewport="true"
+        android:scrollbarSize="2dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:background="#30343B"
-            android:padding="10dp">
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Độ cao bay (m)"
-                    android:textColor="#BDBDBD"
-                    android:textSize="10sp" />
-
-                <EditText
-                    android:id="@+id/edtWPAltitude"
-                    android:layout_width="match_parent"
-                    android:layout_height="40dp"
-                    android:layout_marginTop="4dp"
-                    android:background="#454A52"
-                    android:inputType="numberDecimal"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="8dp"
-                    android:text="10"
-                    android:textColor="#FFFFFF"
-                    android:textSize="12sp" />
-
-            </LinearLayout>
-
-            <Space
-                android:layout_width="10dp"
-                android:layout_height="1dp" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Khoảng cách đường bay (m)"
-                    android:textColor="#BDBDBD"
-                    android:textSize="10sp" />
-
-                <EditText
-                    android:id="@+id/edtWPLineSpacing"
-                    android:layout_width="match_parent"
-                    android:layout_height="40dp"
-                    android:layout_marginTop="4dp"
-                    android:background="#454A52"
-                    android:inputType="numberDecimal"
-                    android:paddingLeft="8dp"
-                    android:paddingRight="8dp"
-                    android:text="5"
-                    android:textColor="#FFFFFF"
-                    android:textSize="12sp" />
-
-            </LinearLayout>
-
-        </LinearLayout>
-
-        <!-- CAMERA -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="30dp"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical"
-            android:text="CAMERA"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:background="#30343B"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp">
-
-            <RadioButton
-                android:id="@+id/rbWPPhoto"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:checked="true"
-                android:text="Chụp ảnh"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-
-            <RadioButton
-                android:id="@+id/rbWPVideo"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginLeft="20dp"
-                android:text="Quay video"
-                android:textColor="#FFFFFF"
-                android:textSize="11sp" />
-
-        </LinearLayout>
-
-        <!-- NÚT -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="45dp"
-            android:layout_marginTop="10dp"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/btnClearWP"
+            <!-- ===== CỘT TRÁI: KHU VỰC + CAMERA ===== -->
+            <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="XÓA LỘ TRÌNH"
-                android:textSize="9sp" />
+                android:orientation="vertical">
 
-            <Space
-                android:layout_width="8dp"
-                android:layout_height="match_parent" />
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:text="KHU VỰC GIÁM SÁT" />
 
-            <Button
-                android:id="@+id/btnCreateWP"
+                <LinearLayout style="@style/WpCard">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/wpFieldDot"
+                            android:layout_width="8dp"
+                            android:layout_height="8dp"
+                            android:background="@drawable/bg_wp_dot"
+                            android:backgroundTint="#6B7178" />
+
+                        <TextView
+                            android:id="@+id/tvWPFieldStatus"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:text="Chưa xác định khu vực"
+                            android:textColor="#E8EAED"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvWPFieldArea"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="0.00 ha"
+                        android:textColor="#FFFFFF"
+                        android:textSize="24sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Diện tích ruộng"
+                        android:textColor="#9AA0A6"
+                        android:textSize="10sp" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnEditWPField"
+                        style="@style/WpButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="36dp"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_wp_btn_outline"
+                        android:text="Chọn / chỉnh khu vực"
+                        android:textColor="@color/txt_wp_outline"
+                        android:textSize="11sp" />
+
+                    <!-- Lưu / mở lại mảnh ruộng để bay lại về sau -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnSaveField"
+                            style="@style/WpButton"
+                            android:layout_width="0dp"
+                            android:layout_height="34dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_wp_btn_ghost"
+                            android:text="Lưu ruộng"
+                            android:textColor="@color/txt_wp_ghost"
+                            android:textSize="11sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnSavedFields"
+                            style="@style/WpButton"
+                            android:layout_width="0dp"
+                            android:layout_height="34dp"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_wp_btn_ghost"
+                            android:text="Ruộng đã lưu"
+                            android:textColor="@color/txt_wp_ghost"
+                            android:textSize="11sp" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:layout_marginTop="12dp"
+                    android:text="CHẾ ĐỘ CAMERA" />
+
+                <RadioGroup
+                    android:id="@+id/rgWPCamera"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:background="@drawable/bg_wp_segment"
+                    android:orientation="horizontal"
+                    android:padding="3dp">
+
+                    <RadioButton
+                        android:id="@+id/rbWPPhoto"
+                        style="@style/WpSegment"
+                        android:checked="true"
+                        android:text="📷  Chụp ảnh" />
+
+                    <RadioButton
+                        android:id="@+id/rbWPVideo"
+                        style="@style/WpSegment"
+                        android:text="🎥  Quay video" />
+                </RadioGroup>
+
+                <!-- Pin yếu -> về Home, lưu tiến độ để bay tiếp -->
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:layout_marginTop="12dp"
+                    android:text="AN TOÀN PIN" />
+
+                <LinearLayout style="@style/WpCard">
+
+                    <TextView
+                        style="@style/WpFieldLabel"
+                        android:text="Tự về Home khi pin còn" />
+
+                    <LinearLayout style="@style/WpInputBox">
+
+                        <EditText
+                            android:id="@+id/edtWPBattery"
+                            style="@style/WpInput"
+                            android:inputType="number"
+                            android:text="30" />
+
+                        <TextView
+                            style="@style/WpUnit"
+                            android:text="%" />
+                    </LinearLayout>
+
+                    <TextView
+                        style="@style/WpRange"
+                        android:text="20 – 60% • lưu tiến độ, thay pin xong bay tiếp đúng chỗ" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- ===== CỘT PHẢI: THÔNG SỐ + ƯỚC TÍNH ===== -->
+            <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:text="TẠO LỘ TRÌNH"
-                android:textSize="9sp" />
+                android:layout_height="wrap_content"
+                android:layout_marginStart="14dp"
+                android:layout_weight="1.35"
+                android:orientation="vertical">
 
-            <Space
-                android:layout_width="8dp"
-                android:layout_height="match_parent" />
+                <!-- Có nhiệm vụ đang dở (pin yếu đã về nhà) -->
+                <LinearLayout
+                    android:id="@+id/wpResumeBanner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="12dp"
+                    android:background="@drawable/bg_cf_warning"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="10dp"
+                    android:visibility="gone">
 
-            <Button
-                android:id="@+id/btnStartMapping"
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:text="BẮT ĐẦU QUÉT"
-                android:textSize="9sp" />
+                    <TextView
+                        android:id="@+id/tvWPResumeInfo"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textColor="#FFD54F"
+                        android:textSize="11sp" />
 
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnWPResume"
+                        style="@style/WpButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginStart="10dp"
+                        android:background="@drawable/bg_cf_btn_fly"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:text="↻  Tiếp tục"
+                        android:textColor="@color/txt_cf_btn_fly" />
+                </LinearLayout>
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:text="THÔNG SỐ BAY" />
+
+                <LinearLayout
+                    style="@style/WpCard"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <!-- Độ cao -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/WpFieldLabel"
+                            android:text="Độ cao bay" />
+
+                        <LinearLayout style="@style/WpInputBox">
+
+                            <EditText
+                                android:id="@+id/edtWPAltitude"
+                                style="@style/WpInput"
+                                android:text="10" />
+
+                            <TextView
+                                style="@style/WpUnit"
+                                android:text="m" />
+                        </LinearLayout>
+
+                        <TextView
+                            style="@style/WpRange"
+                            android:text="5 – 120 m" />
+                    </LinearLayout>
+
+                    <!-- Khoảng cách đường bay -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/WpFieldLabel"
+                            android:text="Cách đường bay" />
+
+                        <LinearLayout style="@style/WpInputBox">
+
+                            <EditText
+                                android:id="@+id/edtWPLineSpacing"
+                                style="@style/WpInput"
+                                android:text="5" />
+
+                            <TextView
+                                style="@style/WpUnit"
+                                android:text="m" />
+                        </LinearLayout>
+
+                        <TextView
+                            style="@style/WpRange"
+                            android:text="1 – 100 m" />
+                    </LinearLayout>
+
+                    <!-- Tốc độ -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/WpFieldLabel"
+                            android:text="Tốc độ bay" />
+
+                        <LinearLayout style="@style/WpInputBox">
+
+                            <EditText
+                                android:id="@+id/edtWPSpeed"
+                                style="@style/WpInput"
+                                android:text="3" />
+
+                            <TextView
+                                style="@style/WpUnit"
+                                android:text="m/s" />
+                        </LinearLayout>
+
+                        <TextView
+                            style="@style/WpRange"
+                            android:text="0.5 – 10 m/s" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:layout_marginTop="12dp"
+                    android:text="ƯỚC TÍNH LỘ TRÌNH" />
+
+                <!-- Ước tính lộ trình / trạng thái nhiệm vụ khi đang bay -->
+                <TextView
+                    android:id="@+id/tvWPEstimate"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_cf_card"
+                    android:lineSpacingExtra="3dp"
+                    android:minHeight="64dp"
+                    android:padding="12dp"
+                    android:text="Nhấn TẠO LỘ TRÌNH để xem đường bay trên bản đồ"
+                    android:textColor="#E8EAED"
+                    android:textSize="11sp" />
+            </LinearLayout>
         </LinearLayout>
+    </ScrollView>
 
-        <Button
-            android:id="@+id/btnConfirmWP"
-            android:layout_width="match_parent"
-            android:layout_height="45dp"
-            android:layout_marginTop="8dp"
-            android:text="XÁC NHẬN WP"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+    <!-- ===== NÚT ===== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal">
 
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnClearWP"
+            style="@style/WpButton"
+            android:layout_width="0dp"
+            android:layout_weight="0.8"
+            android:background="@drawable/bg_wp_btn_ghost"
+            android:text="Xóa lộ trình"
+            android:textColor="@color/txt_wp_ghost" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCreateWP"
+            style="@style/WpButton"
+            android:layout_width="0dp"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_wp_btn_outline"
+            android:text="⟳  Tạo lộ trình"
+            android:textColor="@color/txt_wp_outline" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnStartMapping"
+            style="@style/WpButton"
+            android:layout_width="0dp"
+            android:layout_marginStart="10dp"
+            android:layout_weight="1.2"
+            android:background="@drawable/bg_cf_btn_fly"
+            android:text="✈  Bắt đầu quét"
+            android:textColor="@color/txt_cf_btn_fly" />
     </LinearLayout>
 
-</ScrollView>
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnConfirmWP"
+        style="@style/WpButton"
+        android:layout_width="match_parent"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_wp_btn_danger"
+        android:text="■  Dừng nhiệm vụ &amp; bay về"
+        android:textColor="#FFFFFF"
+        android:visibility="gone" />
+</LinearLayout>

@@ -11,7 +11,10 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
+import android.view.View;
 import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -67,8 +70,12 @@ public class MapActivity extends AppCompatActivity {
     private MapView mapView;
     private MapLibreMap mapLibreMap;
     private Button btnConfirmTarget;
-    private Button btnMyLocation;
+    private ImageButton btnMyLocation;
     private Button btnMapType;
+    private ImageButton btnUndoPoint;
+    private TextView tvMapHint, tvMapArea, tvMapCorners;
+    private final View[] cornerDots = new View[4];
+    private static final int ACCENT = 0xFF69F0AE;
 
     private final List<Marker> fieldMarkers = new ArrayList<>();
 
@@ -106,6 +113,14 @@ public class MapActivity extends AppCompatActivity {
         btnConfirmTarget = findViewById(R.id.btnConfirmTarget);
         btnMyLocation = findViewById(R.id.btnMyLocation);
         btnMapType = findViewById(R.id.btnMapType);
+        btnUndoPoint = findViewById(R.id.btnUndoPoint);
+        tvMapHint = findViewById(R.id.tvMapHint);
+        tvMapArea = findViewById(R.id.tvMapArea);
+        tvMapCorners = findViewById(R.id.tvMapCorners);
+        buildCornerDots();
+        findViewById(R.id.btnMapBack).setOnClickListener(v -> finish());
+        btnUndoPoint.setOnClickListener(v -> undoLastPoint());
+        updateFieldUi();
 
         editField = getIntent().getBooleanExtra("EDIT_FIELD", false);
         oldLatitudes = getIntent().getDoubleArrayExtra("FIELD_LATITUDES");
@@ -142,6 +157,7 @@ public class MapActivity extends AppCompatActivity {
                             LatLng newPosition = mapLibreMap.getProjection().fromScreenLocation(new PointF(event.getX(), event.getY()));
                             fieldMarkers.get(draggingMarkerIndex).setPosition(newPosition);
                             updateFieldPolygon();
+                            updateFieldUi(); // diện tích cập nhật theo tay kéo
                             return true;
                         }
                         return false;
@@ -150,6 +166,7 @@ public class MapActivity extends AppCompatActivity {
                             LatLng newPosition = mapLibreMap.getProjection().fromScreenLocation(new PointF(event.getX(), event.getY()));
                             fieldMarkers.get(draggingMarkerIndex).setPosition(newPosition);
                             updateFieldPolygon();
+                            updateFieldUi();
                             draggingMarkerIndex = -1;
                             return true;
                         }
@@ -164,6 +181,8 @@ public class MapActivity extends AppCompatActivity {
 
         btnMapType.setOnClickListener(v -> {
             isSatellite = !isSatellite;
+            // Nút ghi kiểu bản đồ sẽ chuyển sang khi bấm
+            btnMapType.setText(isSatellite ? "Bản đồ" : "Vệ tinh");
             reloadMapStyle();
         });
 
@@ -226,16 +245,20 @@ public class MapActivity extends AppCompatActivity {
         mapLibreMap.setStyle(styleBuilder, style -> {
             enableLocationComponent(style);
 
+            // Các mảnh ruộng đã lưu (vẽ dưới ruộng đang chọn)
+            addSavedFieldsLayer(style);
+
             polygonSource = new GeoJsonSource(POLYGON_SOURCE_ID);
             style.addSource(polygonSource);
             FillLayer polygonLayer = new FillLayer(POLYGON_LAYER_ID, POLYGON_SOURCE_ID);
-            polygonLayer.setProperties(fillColor("#2196F3"), fillOpacity(0.30f));
+            polygonLayer.setProperties(fillColor("#69F0AE"), fillOpacity(0.22f));
             style.addLayer(polygonLayer);
 
             lineSource = new GeoJsonSource(LINE_SOURCE_ID);
             style.addSource(lineSource);
             LineLayer lineLayer = new LineLayer(LINE_LAYER_ID, LINE_SOURCE_ID);
-            lineLayer.setProperties(lineColor("#1565C0"), lineWidth(3.0f));
+            lineLayer.setProperties(lineColor("#69F0AE"), lineWidth(3.0f),
+                    org.maplibre.android.style.layers.PropertyFactory.lineJoin("round"));
             style.addLayer(lineLayer);
 
             // --- THÊM ICON VÀ LAYER CHO DRONE ---
@@ -265,6 +288,97 @@ public class MapActivity extends AppCompatActivity {
             }
             updateFieldPolygon();
         });
+    }
+
+    // =========================================================
+    // RUỘNG ĐÃ LƯU: xanh = đã bay xong, vàng = bay dở, xám = chưa bay
+    // =========================================================
+    private void addSavedFieldsLayer(Style style) {
+        String exclude = getIntent().getStringExtra("CURRENT_FIELD_ID");
+        List<Feature> polys = new ArrayList<>();
+        List<Feature> labels = new ArrayList<>();
+        for (com.tri.djicontrol.field.SavedFieldStore.SavedField f
+                : com.tri.djicontrol.field.SavedFieldStore.list(this)) {
+            if (f.id.equals(exclude) || f.lats.length < 3) continue;
+            List<LatLng> pts = new ArrayList<>();
+            for (int i = 0; i < f.lats.length; i++) pts.add(new LatLng(f.lats[i], f.lngs[i]));
+            sortAroundCenter(pts);
+            List<Point> ring = new ArrayList<>();
+            for (LatLng p : pts) ring.add(Point.fromLngLat(p.getLongitude(), p.getLatitude()));
+            ring.add(ring.get(0));
+            List<List<Point>> rings = new ArrayList<>();
+            rings.add(ring);
+
+            int color = MainActivity.fieldStatusColor(f.status);
+            String hex = String.format("#%06X", color & 0xFFFFFF);
+            JsonObject props = new JsonObject();
+            props.addProperty("color", hex);
+            polys.add(Feature.fromGeometry(Polygon.fromLngLats(rings), props));
+
+            String img = "saved-field-label-" + f.id;
+            style.addImage(img, fieldLabelBitmap(f.name, f.statusLabel(), color));
+            JsonObject lp = new JsonObject();
+            lp.addProperty("img", img);
+            labels.add(Feature.fromGeometry(Point.fromLngLat(f.centerLng(), f.centerLat()), lp));
+        }
+        if (polys.isEmpty()) return;
+
+        style.addSource(new GeoJsonSource("saved-fields-source",
+                org.maplibre.geojson.FeatureCollection.fromFeatures(polys)));
+        FillLayer fill = new FillLayer("saved-fields-fill", "saved-fields-source");
+        fill.setProperties(fillColor(Expression.get("color")), fillOpacity(0.18f));
+        style.addLayer(fill);
+        LineLayer line = new LineLayer("saved-fields-line", "saved-fields-source");
+        line.setProperties(lineColor(Expression.get("color")), lineWidth(2f),
+                org.maplibre.android.style.layers.PropertyFactory.lineDasharray(new Float[]{2f, 1.5f}));
+        style.addLayer(line);
+
+        style.addSource(new GeoJsonSource("saved-fields-label-source",
+                org.maplibre.geojson.FeatureCollection.fromFeatures(labels)));
+        SymbolLayer lbl = new SymbolLayer("saved-fields-label", "saved-fields-label-source");
+        lbl.setProperties(iconImage(Expression.get("img")), iconAllowOverlap(true), iconIgnorePlacement(true));
+        style.addLayer(lbl);
+    }
+
+    /** Nhãn tên ruộng (vẽ thành ảnh để không phụ thuộc font của kiểu bản đồ). */
+    private Bitmap fieldLabelBitmap(String name, String status, int color) {
+        float d = getResources().getDisplayMetrics().density;
+        android.graphics.Paint title = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        title.setColor(0xFFFFFFFF);
+        title.setTextSize(12 * d);
+        title.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        android.graphics.Paint sub = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        sub.setColor(color);
+        sub.setTextSize(9.5f * d);
+
+        if (name.length() > 24) name = name.substring(0, 23) + "…";
+        float pad = 8 * d, dot = 7 * d;
+        float textW = Math.max(title.measureText(name), sub.measureText(status));
+        int w = (int) (pad * 2 + dot + 6 * d + textW);
+        int h = (int) (pad * 2 + 12 * d + 11 * d);
+        Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        android.graphics.Paint bg = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        bg.setColor(0xE6191C21);
+        c.drawRoundRect(new android.graphics.RectF(0, 0, w, h), 8 * d, 8 * d, bg);
+        bg.setStyle(android.graphics.Paint.Style.STROKE);
+        bg.setStrokeWidth(1.2f * d);
+        bg.setColor(color);
+        c.drawRoundRect(new android.graphics.RectF(0.6f * d, 0.6f * d, w - 0.6f * d, h - 0.6f * d), 8 * d, 8 * d, bg);
+        android.graphics.Paint dp = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        dp.setColor(color);
+        c.drawCircle(pad + dot / 2, h / 2f, dot / 2, dp);
+        float tx = pad + dot + 6 * d;
+        c.drawText(name, tx, pad + 11 * d, title);
+        c.drawText(status, tx, pad + 12 * d + 9.5f * d, sub);
+        return bmp;
+    }
+
+    private void sortAroundCenter(List<LatLng> points) {
+        LatLng center = calculateCenter(points);
+        points.sort((p1, p2) -> Double.compare(
+                Math.atan2(p1.getLatitude() - center.getLatitude(), p1.getLongitude() - center.getLongitude()),
+                Math.atan2(p2.getLatitude() - center.getLatitude(), p2.getLongitude() - center.getLongitude())));
     }
 
     // Hàm liên tục đọc tọa độ và góc xoay từ Drone đưa lên bản đồ Lớn
@@ -322,11 +436,92 @@ public class MapActivity extends AppCompatActivity {
     }
 
     private void addFieldPoint(LatLng point) {
-        Marker marker = mapLibreMap.addMarker(new MarkerOptions().position(point).title("Góc ruộng " + (fieldMarkers.size() + 1)));
+        int no = fieldMarkers.size() + 1;
+        Marker marker = mapLibreMap.addMarker(new MarkerOptions()
+                .position(point)
+                .title("Góc ruộng " + no)
+                .icon(cornerIcon(no)));
         fieldMarkers.add(marker);
         if (fieldMarkers.size() == 4) {
             updateFieldPolygon();
         }
+        updateFieldUi();
+    }
+
+    /** Xóa góc vừa đặt gần nhất. */
+    private void undoLastPoint() {
+        if (fieldMarkers.isEmpty() || mapLibreMap == null) return;
+        Marker last = fieldMarkers.remove(fieldMarkers.size() - 1);
+        mapLibreMap.removeMarker(last);
+        // Chưa đủ 4 góc -> xóa vùng ruộng đang vẽ
+        org.maplibre.geojson.FeatureCollection empty =
+                org.maplibre.geojson.FeatureCollection.fromFeatures(new ArrayList<>());
+        if (polygonSource != null) polygonSource.setGeoJson(empty);
+        if (lineSource != null) lineSource.setGeoJson(empty);
+        currentAreaHa = 0;
+        updateFieldUi();
+    }
+
+    /** Ghim góc ruộng: vòng tròn xanh viền trắng có số thứ tự. */
+    private org.maplibre.android.annotations.Icon cornerIcon(int number) {
+        float d = getResources().getDisplayMetrics().density;
+        int size = (int) (30 * d);
+        Bitmap bmp = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(bmp);
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        float r = size / 2f;
+        p.setColor(0x66000000);
+        c.drawCircle(r, r + d, r - d, p);              // bóng
+        p.setColor(0xFFFFFFFF);
+        c.drawCircle(r, r, r - 2 * d, p);              // viền trắng
+        p.setColor(ACCENT);
+        c.drawCircle(r, r, r - 4.5f * d, p);           // lõi xanh
+        p.setColor(0xFF0F2A1C);
+        p.setTextSize(13 * d);
+        p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        p.setTextAlign(android.graphics.Paint.Align.CENTER);
+        android.graphics.Paint.FontMetrics fm = p.getFontMetrics();
+        c.drawText(String.valueOf(number), r, r - (fm.ascent + fm.descent) / 2f, p);
+        return org.maplibre.android.annotations.IconFactory.getInstance(this).fromBitmap(bmp);
+    }
+
+    private void buildCornerDots() {
+        android.widget.LinearLayout row = findViewById(R.id.mapCornerDots);
+        float d = getResources().getDisplayMetrics().density;
+        for (int i = 0; i < 4; i++) {
+            View dot = new View(this);
+            android.widget.LinearLayout.LayoutParams lp =
+                    new android.widget.LinearLayout.LayoutParams((int) (18 * d), (int) (6 * d));
+            if (i > 0) lp.setMarginStart((int) (4 * d));
+            dot.setLayoutParams(lp);
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setCornerRadius(3 * d);
+            dot.setBackground(g);
+            row.addView(dot);
+            cornerDots[i] = dot;
+        }
+    }
+
+    /** Cập nhật hướng dẫn, số góc, diện tích và trạng thái các nút. */
+    private void updateFieldUi() {
+        int n = fieldMarkers.size();
+        for (int i = 0; i < 4; i++) {
+            if (cornerDots[i] != null) {
+                ((android.graphics.drawable.GradientDrawable) cornerDots[i].getBackground())
+                        .setColor(i < n ? ACCENT : 0x33FFFFFF);
+            }
+        }
+        tvMapCorners.setText(n + " / 4 góc");
+        if (n < 4) {
+            tvMapHint.setText("Chạm lên bản đồ để đặt góc " + (n + 1) + " / 4");
+            tvMapArea.setText("— ha");
+        } else {
+            tvMapHint.setText("Kéo các ghim để chỉnh lại góc ruộng");
+            tvMapArea.setText(String.format(java.util.Locale.US, "%.2f ha", currentAreaHa));
+        }
+        btnUndoPoint.setEnabled(n > 0);
+        btnUndoPoint.setAlpha(n > 0 ? 1f : 0.45f);
+        btnConfirmTarget.setEnabled(n == 4 && currentAreaHa > 0);
     }
 
     private void updateFieldPolygon() {
@@ -359,7 +554,8 @@ public class MapActivity extends AppCompatActivity {
             float dx = x - screenPoint.x;
             float dy = y - screenPoint.y;
             float distance = (float) Math.sqrt(dx * dx + dy * dy);
-            if (distance <= 35f) return i;
+            // Vùng chạm ~28dp quanh ghim cho dễ kéo bằng ngón tay
+            if (distance <= 28f * getResources().getDisplayMetrics().density) return i;
         }
         return -1;
     }

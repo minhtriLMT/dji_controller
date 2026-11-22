@@ -1,13 +1,16 @@
 package com.tri.djicontrol.flight;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
 import java.util.List;
+import java.util.Locale;
 
 import dji.common.camera.SettingsDefinitions;
-import dji.common.camera.SettingsDefinitions.PhotoTimeIntervalSettings;
+import dji.common.flightcontroller.FlightControllerState;
+import dji.common.flightcontroller.GPSSignalLevel;
 import dji.common.flightcontroller.virtualstick.FlightControlData;
 import dji.common.flightcontroller.virtualstick.FlightCoordinateSystem;
 import dji.common.flightcontroller.virtualstick.RollPitchControlMode;
@@ -21,282 +24,736 @@ import dji.sdk.flightcontroller.FlightController;
 import dji.sdk.products.Aircraft;
 import dji.sdk.sdkmanager.DJISDKManager;
 
+/**
+ * Bay quét ruộng tự động bằng Virtual Stick (Mini 2 không hỗ trợ Waypoint Mission của MSDK v4).
+ *
+ * Quy trình: (cất cánh nếu đang ở đất) -> lên độ cao di chuyển -> bay tới điểm đầu ->
+ * hạ/nâng về độ cao quét -> bật camera (chụp theo quãng đường / quay video) -> bay zigzag
+ * -> dừng camera -> bay về nhà (RTH).
+ *
+ * Ảnh/video được ghi vào thẻ nhớ drone -> xem trong Kho lưu trữ (tab THẺ NHỚ DRONE).
+ */
 public class FlightMissionManager {
+
+    public interface MissionListener {
+        /** Trạng thái hiển thị cho người dùng (chạy trên main thread). */
+        void onStatus(String status);
+
+        /** Đã đi qua index waypoint (0..total). */
+        void onProgress(int reachedIndex, int total, int photoCount);
+
+        void onFinished(boolean completed, String message);
+
+        /** Bay quét chế độ video: bắt đầu (true) / dừng (false) quay. */
+        default void onRecordingChanged(boolean recording) {}
+
+        /** Nhiệm vụ dừng giữa chừng (pin yếu / drone tự về nhà) và đã lưu tiến độ để bay tiếp. */
+        default void onCheckpointSaved(MissionCheckpoint checkpoint) {}
+    }
+
+    // --- Pin yếu: về nhà + lưu tiến độ để bay tiếp sau khi thay pin ---
+    /** Ngưỡng mặc định (%): pin còn bằng hoặc dưới mức này thì dừng quét và về nhà. */
+    public static final int DEFAULT_LOW_BATTERY_PERCENT = 30;
+    /** Cộng thêm vào mức pin drone tính là cần để về nhà (dự phòng gió / hạ cánh). */
+    private static final int RTH_BATTERY_MARGIN = 10;
+
+    private volatile int batteryPercent = -1;
+    private int lowBatteryPercent = DEFAULT_LOW_BATTERY_PERCENT;
+    private int lastThreshold = DEFAULT_LOW_BATTERY_PERCENT;
+
+    /** Lộ trình gốc đầy đủ (khi bay tiếp, "waypoints" chỉ là phần còn lại). */
+    private List<LocationCoordinate2D> fullPlan;
+    /** Đang bay tiếp nhiệm vụ dở: waypoints[i] ứng với fullPlan[resumeOffset + i]. */
+    private boolean resumed = false;
+    private int resumeOffset = 0;
+
     private static final String TAG = "FlightMissionManager";
+    private static final long LOOP_MS = 100;              // 10Hz (DJI khuyến nghị 5–25Hz)
+    private static final double ARRIVE_RADIUS = 1.5;      // m
+    private static final float TRANSIT_ALT_MIN = 20f;     // độ cao di chuyển an toàn tối thiểu
+    private static final float MAX_TRANSIT_SPEED = 5f;    // m/s
+    private static final long MIN_PHOTO_GAP_MS = 2200;    // Mini 2 cần ~2s để ghi 1 ảnh
+
+    // --- Dừng hẳn rồi mới chụp (ảnh nét, không nhòe do drone đang trôi) ---
+    /** Thời gian tối thiểu giữ yên tại điểm chụp trước khi bấm (cho gimbal + thân máy hết rung). */
+    public static final long PHOTO_STABILIZE_MS = 1200;
+    /** Chỉ bấm chụp khi tốc độ ngang còn dưới ngưỡng này (m/s). */
+    private static final double PHOTO_SETTLE_SPEED = 0.3;
+    /** Giữ yên tối đa bấy nhiêu ms; quá thì chụp luôn (gió mạnh không đứng yên được). */
+    private static final long PHOTO_MAX_HOLD_MS = 4000;
+    /** Đứng thêm sau khi camera báo chụp xong, rồi mới bay tiếp. */
+    private static final long PHOTO_AFTER_SHOT_MS = 400;
+    /** Camera không phản hồi quá lâu thì bỏ qua ảnh này và bay tiếp. */
+    private static final long PHOTO_SHOT_TIMEOUT_MS = 5000;
+    /** Ước tính tổng thời gian dừng cho 1 ảnh (phanh + ổn định + chụp) — dùng để tính thời gian bay. */
+    public static final double PHOTO_STOP_SECONDS_ESTIMATE = 3.0;
+
+    private boolean holding = false, shotFired = false;
+    private double holdLat, holdLng;
+    private float holdYaw;
+    private long holdStartMs, shotFiredMs, holdReleaseAtMs;
+
     private FlightController flightController;
     private Camera camera;
     private dji.sdk.gimbal.Gimbal gimbal;
-    private Handler missionHandler;
-    private Runnable missionRunnable;
-    private boolean isMissionRunning = false;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private Runnable loop;
+    private volatile boolean running = false;
 
-    // Các biến phục vụ Mapping
     private List<LocationCoordinate2D> waypoints;
-    private int currentWaypointIndex = 0;
+    private int wpIndex = 0;
+    private float scanAlt, transitAlt, cruiseSpeed;
+    private boolean videoMode;
+    private double photoDistance;
+    private MissionListener listener;
 
-    private float targetAltitude; // Độ cao bay sát quét lúa (User setup)
-    private float safeTransitAltitude = 20.0f; // Độ cao an toàn lúc di chuyển ra đồng
+    // Chụp ảnh theo quãng đường
+    private double lastShotLat = Double.NaN, lastShotLng = Double.NaN;
+    private long lastShotTime = 0;
+    private boolean shooting = false;
+    private int photoCount = 0;
+    private boolean cameraReady = false;
+    private boolean recording = false;
+    private long stateStartTime;
 
-    private enum MissionState {
-        RISING_TO_SAFE_ALT,       // 1. Bay lên độ cao an toàn (20m)
-        FLYING_TO_FIRST_POINT,    // 2. Bay đến điểm quét đầu tiên
-        DESCENDING_TO_SCAN,       // 3. Hạ độ cao xuống sát lúa (Target Altitude)
-        FLYING_WAYPOINTS,         // 4. Bắt đầu bay quét zigzag
-        COMPLETED                 // 5. Hoàn thành
-    }
-    private MissionState currentMissionState = MissionState.RISING_TO_SAFE_ALT;
+    private enum State { TAKING_OFF, RISING, TO_FIRST_POINT, TO_SCAN_ALT, PREPARING_CAMERA, SCANNING, FINISHING, IDLE }
+    private State state = State.IDLE;
 
-    public FlightMissionManager() {
+    private final Context appContext;
+    private String missionId;
+    private boolean missionLogOpen = false;
+
+    public FlightMissionManager(Context context) {
+        appContext = context.getApplicationContext();
         if (DJISDKManager.getInstance().getProduct() instanceof Aircraft) {
             Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
             flightController = aircraft.getFlightController();
             camera = aircraft.getCamera();
             gimbal = aircraft.getGimbal();
         }
-        missionHandler = new Handler(Looper.getMainLooper());
     }
 
-    public void startMappingMission(List<LocationCoordinate2D> gridPoints, float scanAltitude) {
-        if (flightController == null || gridPoints == null || gridPoints.isEmpty()) {
-            Log.e(TAG, "FlightController chưa sẵn sàng hoặc không có điểm bay!");
+    public boolean isRunning() {
+        return running;
+    }
+
+    /** Mã chuyến bay đang/vừa chạy (vd M_20261122_101530), null nếu chưa bay. */
+    public String getMissionId() {
+        return missionId;
+    }
+
+    /** MainActivity chuyển tiếp % pin từ Battery state callback (mỗi pin chỉ có 1 callback). */
+    public void onBatteryUpdate(int percent) {
+        batteryPercent = percent;
+    }
+
+    /** Ngưỡng pin (%) để dừng quét và về nhà. */
+    public void setLowBatteryThreshold(int percent) {
+        lowBatteryPercent = Math.max(15, Math.min(80, percent));
+    }
+
+    /**
+     * @param photoDistance chụp 1 ảnh mỗi photoDistance mét (chỉ dùng khi chụp ảnh)
+     */
+    public void startMappingMission(List<LocationCoordinate2D> gridPoints, float scanAltitude, float speed,
+                                    boolean video, double photoDistance, MissionListener l) {
+        startInternal(gridPoints, scanAltitude, speed, video, photoDistance, l, null);
+    }
+
+    /**
+     * Bay tiếp nhiệm vụ đang dở: bay thẳng tới chỗ đã dừng rồi quét phần còn lại
+     * (cùng mission_id, số ảnh cộng dồn).
+     */
+    public void resumeMission(MissionCheckpoint cp, MissionListener l) {
+        List<LocationCoordinate2D> list = new java.util.ArrayList<>();
+        if (cp.scanStarted && cp.nextIndex > 0) {
+            list.add(new LocationCoordinate2D(cp.resumeLat, cp.resumeLng));
+            list.addAll(cp.waypoints.subList(cp.nextIndex, cp.waypoints.size()));
+        } else {
+            list.addAll(cp.waypoints); // chưa kịp quét -> bay lại từ đầu
+        }
+        startInternal(list, cp.scanAltitude, cp.speed, cp.video, cp.photoDistance, l, cp);
+    }
+
+    private void startInternal(List<LocationCoordinate2D> gridPoints, float scanAltitude, float speed,
+                               boolean video, double photoDistance, MissionListener l, MissionCheckpoint cp) {
+        this.listener = l;
+        if (running) { status("Nhiệm vụ đang chạy!"); return; }
+        if (flightController == null || flightController.getState() == null) {
+            finish(false, "Chưa kết nối được bộ điều khiển bay!");
+            return;
+        }
+        if (gridPoints == null || gridPoints.size() < 2) {
+            finish(false, "Chưa có lộ trình bay!");
+            return;
+        }
+        FlightControllerState st = flightController.getState();
+        GPSSignalLevel gps = st.getGPSSignalLevel();
+        if (gps == null || gps == GPSSignalLevel.NONE || gps == GPSSignalLevel.LEVEL_0
+                || gps == GPSSignalLevel.LEVEL_1 || gps == GPSSignalLevel.LEVEL_2) {
+            finish(false, "GPS yếu (" + gps + "). Cần GPS mạnh hơn để bay tự động!");
             return;
         }
 
-        this.waypoints = gridPoints;
-        this.currentWaypointIndex = 0;
-        this.targetAltitude = scanAltitude;
-        this.isMissionRunning = true;
+        waypoints = gridPoints;
+        wpIndex = 0;
+        scanAlt = scanAltitude;
+        transitAlt = Math.max(scanAltitude, TRANSIT_ALT_MIN);
+        cruiseSpeed = speed;
+        videoMode = video;
+        this.photoDistance = Math.max(1.0, photoDistance);
+        photoCount = 0;
+        shooting = false;
+        cameraReady = false;
+        recording = false;
+        lastShotLat = Double.NaN;
+        lastShotTime = 0;
+        holding = false;
+        shotFired = false;
+        running = true;
+        if (cp == null) {
+            fullPlan = gridPoints;
+            resumed = false;
+            resumeOffset = 0;
+            // Ghi lại chuyến bay để ảnh/video upload sau này được gắn đúng mission_id
+            missionId = MissionLog.start(appContext, gridPoints, scanAltitude, video);
+        } else {
+            fullPlan = cp.waypoints;
+            resumed = cp.scanStarted && cp.nextIndex > 0;
+            resumeOffset = resumed ? cp.nextIndex - 1 : 0;
+            photoCount = cp.photoCount;
+            lastShotLat = cp.lastShotLat; // ảnh tiếp theo cách ảnh cuối đúng photoDistance
+            lastShotLng = cp.lastShotLng;
+            missionId = MissionLog.start(appContext, cp.missionId, gridPoints, scanAltitude, video);
+        }
+        missionLogOpen = true;
 
-        // Luôn nâng gimbal lên 0 độ khi đang di chuyển ra đồng để an toàn
         setGimbalAngle(0f);
-        this.currentMissionState = MissionState.RISING_TO_SAFE_ALT;
 
-        flightController.setVirtualStickModeEnabled(true, djiError -> {
-            if (djiError == null) {
-                flightController.setRollPitchCoordinateSystem(FlightCoordinateSystem.BODY);
-                flightController.setRollPitchControlMode(RollPitchControlMode.VELOCITY);
-                flightController.setVerticalControlMode(VerticalControlMode.POSITION);
-                flightController.setYawControlMode(YawControlMode.ANGLE);
-                flightController.setVirtualStickAdvancedModeEnabled(true);
-
-                startMissionLoop();
-            } else {
-                Log.e(TAG, "Không thể bật Virtual Stick: " + djiError.getDescription());
-            }
-        });
-    }
-
-    private void startMissionLoop() {
-        missionRunnable = new Runnable() {
-            @Override
-            public void run() {
-                if (!isMissionRunning || flightController == null || flightController.getState() == null
-                        || flightController.getState().getAircraftLocation() == null) {
+        if (st.isFlying()) {
+            enableVirtualStick();
+        } else {
+            setState(State.TAKING_OFF);
+            status("Đang cất cánh...");
+            flightController.startTakeoff(err -> {
+                if (err != null) {
+                    finish(false, "Không cất cánh được: " + err.getDescription());
                     return;
                 }
+                waitForTakeoff(0);
+            });
+        }
+    }
 
-                double currentLat = flightController.getState().getAircraftLocation().getLatitude();
-                double currentLng = flightController.getState().getAircraftLocation().getLongitude();
-                float currentAlt = flightController.getState().getAircraftLocation().getAltitude();
+    private void waitForTakeoff(int tries) {
+        handler.postDelayed(() -> {
+            if (!running) return;
+            FlightControllerState st = flightController.getState();
+            if (st != null && st.isFlying() && st.getAircraftLocation() != null
+                    && st.getAircraftLocation().getAltitude() >= 1.0f) {
+                enableVirtualStick();
+            } else if (tries > 40) { // ~20s
+                finish(false, "Cất cánh quá lâu, đã hủy nhiệm vụ!");
+            } else {
+                waitForTakeoff(tries + 1);
+            }
+        }, 500);
+    }
 
-                switch (currentMissionState) {
+    private void enableVirtualStick() {
+        flightController.setVirtualStickModeEnabled(true, err -> {
+            if (err != null) {
+                finish(false, "Không bật được Virtual Stick: " + err.getDescription());
+                return;
+            }
+            // Hệ GROUND: roll = vận tốc hướng Bắc, pitch = vận tốc hướng Đông (quy ước DJI).
+            // (Code cũ dùng BODY + pitch -> drone bay ngang sang phải thay vì bay tới điểm.)
+            flightController.setRollPitchCoordinateSystem(FlightCoordinateSystem.GROUND);
+            flightController.setRollPitchControlMode(RollPitchControlMode.VELOCITY);
+            flightController.setVerticalControlMode(VerticalControlMode.POSITION);
+            flightController.setYawControlMode(YawControlMode.ANGLE);
+            flightController.setVirtualStickAdvancedModeEnabled(true);
+            setState(State.RISING);
+            status(String.format(Locale.US, "Bay lên độ cao di chuyển %.0fm...", transitAlt));
+            startLoop();
+        });
+    }
 
-                    // GIAI ĐOẠN 1: Bay lên độ cao an toàn để không vướng cây
-                    case RISING_TO_SAFE_ALT:
-                        flightController.sendVirtualStickFlightControlData(
-                                new FlightControlData(0.0f, 0.0f, 0.0f, safeTransitAltitude), djiError -> {}
-                        );
-                        if (Math.abs(currentAlt - safeTransitAltitude) < 1.0) {
-                            currentMissionState = MissionState.FLYING_TO_FIRST_POINT;
-                        }
-                        break;
-
-                    // GIAI ĐOẠN 2: Di chuyển đến điểm đánh dấu đầu tiên
-                    case FLYING_TO_FIRST_POINT:
-                        LocationCoordinate2D firstPoint = waypoints.get(0);
-                        double distToFirst = calculateDistance(currentLat, currentLng, firstPoint.getLatitude(), firstPoint.getLongitude());
-
-                        if (distToFirst < 2.0) {
-                            // Đã tới điểm đầu tiên trên không -> bắt đầu hạ thấp
-                            currentMissionState = MissionState.DESCENDING_TO_SCAN;
-                            // Cắm góc camera vuông góc xuống đất chuẩn bị quét
-                            setGimbalAngle(-90f);
-                        } else {
-                            double bearing = calculateBearing(currentLat, currentLng, firstPoint.getLatitude(), firstPoint.getLongitude());
-                            float speed = (float) Math.max(0.5, Math.min(distToFirst * 0.4, 5.0)); // Bay tối đa 5m/s lúc transit
-                            flightController.sendVirtualStickFlightControlData(
-                                    new FlightControlData(speed, 0.0f, (float)bearing, safeTransitAltitude), djiError -> {}
-                            );
-                        }
-                        break;
-
-                    // GIAI ĐOẠN 3: Hạ cao độ xuống sát lúa (Target Altitude)
-                    case DESCENDING_TO_SCAN:
-                        flightController.sendVirtualStickFlightControlData(
-                                new FlightControlData(0.0f, 0.0f, 0.0f, targetAltitude), djiError -> {}
-                        );
-                        if (Math.abs(currentAlt - targetAltitude) < 0.5) {
-                            currentMissionState = MissionState.FLYING_WAYPOINTS;
-
-                            // Bắt đầu chụp ảnh liên tục (Timelapse) khi đã đạt độ cao sát lúa
-                            startIntervalShooting(() -> {});
-                        }
-                        break;
-
-                    // GIAI ĐOẠN 4: Bay ziczac để chụp ảnh
-                    case FLYING_WAYPOINTS:
-                        if (currentWaypointIndex >= waypoints.size()) {
-                            // Đã quét xong
-                            currentMissionState = MissionState.COMPLETED;
-                            stopIntervalShootingAndGoHome();
-                            return;
-                        }
-
-                        LocationCoordinate2D target = waypoints.get(currentWaypointIndex);
-                        double distance = calculateDistance(currentLat, currentLng, target.getLatitude(), target.getLongitude());
-
-                        if (distance < 2.0) {
-                            currentWaypointIndex++; // Qua điểm tiếp theo
-                            break;
-                        }
-
-                        double gridBearing = calculateBearing(currentLat, currentLng, target.getLatitude(), target.getLongitude());
-                        // Giới hạn tốc độ Mapping (Max 3.0 m/s để ảnh ko mờ do bay sát đất)
-                        double gridSpeed = Math.max(0.5, Math.min(distance * 0.4, 3.0));
-
-                        flightController.sendVirtualStickFlightControlData(
-                                new FlightControlData((float)gridSpeed, 0.0f, (float)gridBearing, targetAltitude), djiError -> {}
-                        );
-                        break;
-
-                    default:
-                        break;
+    private void startLoop() {
+        loop = new Runnable() {
+            @Override
+            public void run() {
+                if (!running) return;
+                try {
+                    tick();
+                } catch (Exception e) {
+                    Log.e(TAG, "tick", e);
                 }
-
-                if (isMissionRunning) {
-                    missionHandler.postDelayed(this, 50); // 20Hz
-                }
+                if (running) handler.postDelayed(this, LOOP_MS);
             }
         };
-        missionHandler.post(missionRunnable);
+        handler.post(loop);
     }
 
-    private void startIntervalShooting(Runnable onReady) {
-        if (camera == null) {
-            onReady.run();
+    private void tick() {
+        FlightControllerState st = flightController.getState();
+        if (st == null || st.getAircraftLocation() == null) return;
+
+        double lat = st.getAircraftLocation().getLatitude();
+        double lng = st.getAircraftLocation().getLongitude();
+        float alt = st.getAircraftLocation().getAltitude();
+        float yaw = (float) st.getAttitude().yaw;
+
+        boolean active = state == State.RISING || state == State.TO_FIRST_POINT || state == State.TO_SCAN_ALT
+                || state == State.PREPARING_CAMERA || state == State.SCANNING;
+
+        // Pin xuống ngưỡng -> lưu tiến độ, dừng camera, tự bay về Home
+        if (active && batteryPercent > 0) {
+            lastThreshold = batteryThreshold(st);
+            if (batteryPercent <= lastThreshold) {
+                MissionCheckpoint cp = saveCheckpoint(lat, lng, "Pin yếu");
+                abort(String.format(Locale.US,
+                        "Pin yếu (%d%%) — đã lưu tiến độ %d%%, drone đang bay về Home.\n"
+                                + "Thay pin đầy rồi bấm TIẾP TỤC để quét phần còn lại.",
+                        batteryPercent, cp.progressPercent()), true);
+                return;
+            }
+        }
+
+        // Người dùng/drone tự kích hoạt RTH (vd Smart RTH khi pin yếu) hoặc đáp -> dừng nhiệm vụ
+        if (st.isGoingHome()) {
+            if (active) {
+                MissionCheckpoint cp = saveCheckpoint(lat, lng, "Drone tự bay về nhà");
+                abort("Drone đang tự bay về nhà — đã lưu tiến độ " + cp.progressPercent()
+                        + "%, có thể bay tiếp sau.", false);
+            } else {
+                abort("Drone đang tự bay về nhà, đã dừng nhiệm vụ", false);
+            }
+            return;
+        }
+        if (!st.isFlying() && state != State.TAKING_OFF) { abort("Drone đã hạ cánh, đã dừng nhiệm vụ", false); return; }
+
+        switch (state) {
+            case RISING:
+                send(0, 0, yaw, transitAlt);
+                if (Math.abs(alt - transitAlt) < 1.0f) {
+                    setState(State.TO_FIRST_POINT);
+                    status("Bay tới điểm bắt đầu quét...");
+                }
+                break;
+
+            case TO_FIRST_POINT: {
+                LocationCoordinate2D first = waypoints.get(0);
+                if (flyToward(lat, lng, first, MAX_TRANSIT_SPEED, transitAlt, yaw)) {
+                    setState(State.TO_SCAN_ALT);
+                    setGimbalAngle(-90f); // camera nhìn thẳng xuống
+                    status(String.format(Locale.US, "Về độ cao quét %.0fm...", scanAlt));
+                }
+                break;
+            }
+
+            case TO_SCAN_ALT:
+                holdAt(lat, lng, waypoints.get(0), yaw, scanAlt);
+                if (Math.abs(alt - scanAlt) < 0.5f) {
+                    setState(State.PREPARING_CAMERA);
+                    status(videoMode ? "Bật quay video..." : "Chuẩn bị camera chụp ảnh...");
+                    prepareCamera();
+                }
+                break;
+
+            case PREPARING_CAMERA:
+                holdAt(lat, lng, waypoints.get(0), yaw, scanAlt);
+                if (cameraReady) {
+                    setState(State.SCANNING);
+                    wpIndex = 1; // đang ở điểm 0, bay tới điểm 1
+                    status("Đang bay quét...");
+                    progress();
+                } else if (System.currentTimeMillis() - stateStartTime > 15000) {
+                    abort("Camera không sẵn sàng sau 15s, đã dừng nhiệm vụ", true);
+                }
+                break;
+
+            case SCANNING: {
+                if (!videoMode) {
+                    // Đang dừng tại điểm chụp: giữ yên, chưa bay tiếp
+                    if (holding) { tickPhotoHold(st, lat, lng); break; }
+                    if (shouldShootHere(lat, lng)) {
+                        startPhotoHold(lat, lng, yaw);
+                        tickPhotoHold(st, lat, lng);
+                        break;
+                    }
+                }
+                if (wpIndex >= waypoints.size()) {
+                    setState(State.FINISHING);
+                    status("Quét xong, dừng camera và bay về...");
+                    finishMission();
+                    return;
+                }
+                LocationCoordinate2D target = waypoints.get(wpIndex);
+                if (flyToward(lat, lng, target, cruiseSpeed, scanAlt, yaw)) {
+                    wpIndex++;
+                    progress();
+                }
+                break;
+            }
+
+            case FINISHING:
+                send(0, 0, yaw, scanAlt); // giữ yên trong lúc dừng camera
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    /** Bay về target. Trả true khi đã tới nơi. */
+    private boolean flyToward(double lat, double lng, LocationCoordinate2D target, float maxSpeed, float altitude, float yaw) {
+        double dist = GridPlanner.distance(lat, lng, target.getLatitude(), target.getLongitude());
+        if (dist < ARRIVE_RADIUS) return true;
+        double bearing = bearing(lat, lng, target.getLatitude(), target.getLongitude());
+        // Giảm tốc khi gần điểm để không vọt qua góc
+        float speed = (float) Math.max(0.5, Math.min(maxSpeed, dist * 0.6));
+        double rad = Math.toRadians(bearing);
+        float vNorth = (float) (speed * Math.cos(rad));
+        float vEast = (float) (speed * Math.sin(rad));
+        // Chỉ xoay mũi theo hướng bay khi còn xa, gần điểm giữ hướng cũ để khỏi xoay vòng
+        float yawCmd = dist > 3 ? (float) bearing : yaw;
+        send(vEast, vNorth, yawCmd, altitude);
+        return false;
+    }
+
+    /** Giữ vị trí (tự kéo về điểm nếu bị gió đẩy). */
+    private void holdAt(double lat, double lng, LocationCoordinate2D p, float yaw, float altitude) {
+        double dist = GridPlanner.distance(lat, lng, p.getLatitude(), p.getLongitude());
+        if (dist < ARRIVE_RADIUS) { send(0, 0, yaw, altitude); return; }
+        double rad = Math.toRadians(bearing(lat, lng, p.getLatitude(), p.getLongitude()));
+        float speed = (float) Math.min(1.5, dist * 0.5);
+        send((float) (speed * Math.sin(rad)), (float) (speed * Math.cos(rad)), yaw, altitude);
+    }
+
+    /** pitch = vận tốc Đông, roll = vận tốc Bắc (hệ GROUND). */
+    private void send(float vEast, float vNorth, float yaw, float altitude) {
+        flightController.sendVirtualStickFlightControlData(
+                new FlightControlData(vEast, vNorth, normalizeYaw(yaw), altitude), null);
+    }
+
+    // =========================================================
+    // CAMERA
+    // =========================================================
+    private boolean isFlat() {
+        try { return camera != null && camera.isFlatCameraModeSupported(); } catch (Exception e) { return false; }
+    }
+
+    private void prepareCamera() {
+        if (camera == null) { cameraReady = true; return; }
+        Runnable afterMode = () -> {
+            if (videoMode) {
+                camera.startRecordVideo(err -> {
+                    if (err != null) {
+                        abort("Không bật được quay video: " + err.getDescription(), true);
+                    } else {
+                        recording = true;
+                        cameraReady = true;
+                        notifyRecording(true);
+                    }
+                });
+            } else if (!isFlat()) {
+                camera.setShootPhotoMode(SettingsDefinitions.ShootPhotoMode.SINGLE, err -> cameraReady = true);
+            } else {
+                cameraReady = true;
+            }
+        };
+
+        if (isFlat()) {
+            // Mini 2 / Air 2...: dùng FlatCameraMode (setMode(SHOOT_PHOTO) không hỗ trợ -> code cũ không chụp được)
+            camera.exitPlayback(ignored -> camera.setFlatMode(
+                    videoMode ? SettingsDefinitions.FlatCameraMode.VIDEO_NORMAL
+                              : SettingsDefinitions.FlatCameraMode.PHOTO_SINGLE,
+                    err -> {
+                        if (err != null) Log.w(TAG, "setFlatMode: " + err.getDescription());
+                        handler.postDelayed(afterMode, 800);
+                    }));
+        } else {
+            camera.setMode(videoMode ? SettingsDefinitions.CameraMode.RECORD_VIDEO
+                                     : SettingsDefinitions.CameraMode.SHOOT_PHOTO,
+                    err -> {
+                        if (err != null) Log.w(TAG, "setMode: " + err.getDescription());
+                        handler.postDelayed(afterMode, 800);
+                    });
+        }
+    }
+
+    /** Đã đi đủ photoDistance mét kể từ ảnh trước (ảnh đầu tiên: chụp ngay). */
+    private boolean shouldShootHere(double lat, double lng) {
+        if (camera == null || shooting) return false;
+        if (System.currentTimeMillis() - lastShotTime < MIN_PHOTO_GAP_MS) return false;
+        return Double.isNaN(lastShotLat)
+                || GridPlanner.distance(lat, lng, lastShotLat, lastShotLng) >= photoDistance;
+    }
+
+    /** Bắt đầu phanh lại và giữ yên tại vị trí hiện tại để chụp. */
+    private void startPhotoHold(double lat, double lng, float yaw) {
+        holding = true;
+        shotFired = false;
+        holdLat = lat;
+        holdLng = lng;
+        holdYaw = yaw; // giữ nguyên hướng mũi, không xoay khi chụp
+        holdStartMs = System.currentTimeMillis();
+        holdReleaseAtMs = 0;
+        // Ghi nhận điểm chụp ngay để quãng đường tới ảnh sau tính từ đây
+        lastShotLat = lat;
+        lastShotLng = lng;
+    }
+
+    /**
+     * Mỗi vòng lặp khi đang dừng chụp: giữ yên -> đợi ổn định -> bấm chụp -> đợi ghi xong -> bay tiếp.
+     */
+    private void tickPhotoHold(FlightControllerState st, double lat, double lng) {
+        holdAt(lat, lng, new LocationCoordinate2D(holdLat, holdLng), holdYaw, scanAlt);
+        long now = System.currentTimeMillis();
+
+        if (!shotFired) {
+            double vx = st.getVelocityX(), vy = st.getVelocityY();
+            double hSpeed = Math.sqrt(vx * vx + vy * vy);
+            long held = now - holdStartMs;
+            boolean stable = held >= PHOTO_STABILIZE_MS && hSpeed < PHOTO_SETTLE_SPEED;
+            if (stable || held >= PHOTO_MAX_HOLD_MS) {
+                if (!stable) Log.w(TAG, String.format(Locale.US, "Chụp khi chưa đứng yên hẳn (%.2f m/s)", hSpeed));
+                fireHoldShot();
+            }
             return;
         }
 
-        camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, djiError -> {
-            if (djiError == null) {
-                // Cài đặt chụp 255 ảnh liên tục, mỗi 2 giây 1 tấm
-                PhotoTimeIntervalSettings intervalSettings = new PhotoTimeIntervalSettings(255, 2);
-                camera.setPhotoTimeIntervalSettings(intervalSettings, error -> {
-                    if (error == null) {
-                        camera.setShootPhotoMode(SettingsDefinitions.ShootPhotoMode.INTERVAL, modeError -> {
-                            if (modeError == null) {
-                                camera.startShootPhoto(startError -> onReady.run());
-                            } else {
-                                onReady.run();
-                            }
-                        });
-                    } else {
-                        onReady.run();
-                    }
-                });
+        // Camera không phản hồi -> bỏ qua ảnh này, bay tiếp
+        if (shooting && now - shotFiredMs > PHOTO_SHOT_TIMEOUT_MS) {
+            Log.w(TAG, "Camera không phản hồi, bỏ qua ảnh");
+            shooting = false;
+            holdReleaseAtMs = now;
+        }
+        if (!shooting && holdReleaseAtMs > 0 && now >= holdReleaseAtMs) {
+            holding = false; // vòng lặp sau sẽ bay tiếp tới waypoint
+        }
+    }
+
+    private void fireHoldShot() {
+        shotFired = true;
+        shooting = true;
+        shotFiredMs = System.currentTimeMillis();
+        lastShotTime = shotFiredMs;
+        camera.startShootPhoto(err -> handler.post(() -> {
+            shooting = false;
+            holdReleaseAtMs = System.currentTimeMillis() + PHOTO_AFTER_SHOT_MS;
+            if (err == null) {
+                photoCount++;
+                progress();
             } else {
-                onReady.run();
+                Log.w(TAG, "Chụp lỗi: " + err.getDescription());
+            }
+        }));
+    }
+
+    private void stopCamera(Runnable then) {
+        if (camera != null && recording) {
+            camera.stopRecordVideo(err -> handler.post(() -> {
+                recording = false;
+                notifyRecording(false);
+                then.run();
+            }));
+        } else {
+            // Đợi ảnh cuối ghi xong
+            handler.postDelayed(then, shooting ? 2000 : 300);
+        }
+    }
+
+    // =========================================================
+    // KẾT THÚC / DỪNG
+    // =========================================================
+    private void finishMission() {
+        MissionCheckpoint.clear(appContext); // quét xong toàn bộ -> không còn gì để bay tiếp
+        stopCamera(() -> {
+            setGimbalAngle(0f);
+            goHome(String.format(Locale.US, "Hoàn thành quét! %s Drone đang bay về.",
+                    videoMode ? "Đã lưu video vào thẻ nhớ." : "Đã chụp " + photoCount + " ảnh."), true);
+        });
+    }
+
+    /** Người dùng bấm DỪNG: dừng camera, thoát Virtual Stick và bay về nhà. */
+    public void stopAndReturnHome() {
+        if (!running) {
+            startReturnToHome();
+            return;
+        }
+        MissionCheckpoint.clear(appContext); // người dùng chủ động dừng -> bỏ tiến độ cũ
+        abort("Đã dừng nhiệm vụ, drone đang bay về nhà", true);
+    }
+
+    private void abort(String msg, boolean goHome) {
+        if (!running) return;
+        setState(State.FINISHING);
+        stopCamera(() -> {
+            setGimbalAngle(0f);
+            if (goHome) goHome(msg, false);
+            else {
+                stopLoopAndStick();
+                finish(false, msg);
             }
         });
     }
 
-    private void stopIntervalShootingAndGoHome() {
-        if (missionRunnable != null) {
-            missionHandler.removeCallbacks(missionRunnable);
-        }
-
-        if (camera != null) {
-            camera.stopShootPhoto(djiError -> prepareAndGoHome());
-        } else {
-            prepareAndGoHome();
-        }
-    }
-
-    private void prepareAndGoHome() {
-        setGimbalAngle(0f); // Ngẩng cam lên nhìn thẳng
+    private void goHome(String msg, boolean completed) {
+        stopLoopAndStick();
         if (flightController != null) {
-            flightController.setVirtualStickModeEnabled(false, djiError -> {
-                flightController.startGoHome(error -> {
-                    if (error == null) {
-                        Log.d(TAG, "Đã kích hoạt RTH!");
-                    }
-                    cancelMission();
-                });
-            });
+            flightController.startGoHome(err -> handler.post(() -> finish(completed,
+                    err == null ? msg : msg + " (RTH lỗi: " + err.getDescription() + ")")));
+        } else {
+            finish(completed, msg);
         }
     }
 
-    public void setGimbalAngle(float pitchAngle) {
-        if (gimbal != null) {
-            Rotation rotation = new Rotation.Builder()
-                    .mode(RotationMode.ABSOLUTE_ANGLE)
-                    .pitch(pitchAngle)
-                    .build();
-            gimbal.rotate(rotation, null);
-        }
+    private void stopLoopAndStick() {
+        running = false;
+        if (loop != null) handler.removeCallbacks(loop);
+        if (flightController != null) flightController.setVirtualStickModeEnabled(false, null);
     }
 
+    private void finish(boolean completed, String msg) {
+        running = false;
+        endMissionLog(completed);
+        state = State.IDLE;
+        Log.d(TAG, msg);
+        if (listener != null) handler.post(() -> listener.onFinished(completed, msg));
+    }
+
+    /** Nút RTH trên màn hình chính. */
     public void startReturnToHome() {
-        if (flightController == null) {
-            Log.e(TAG, "FlightController chưa sẵn sàng!");
-            return;
-        }
+        if (running) { stopAndReturnHome(); return; }
+        if (flightController == null) return;
+        flightController.setVirtualStickModeEnabled(false, err ->
+                flightController.startGoHome(e -> Log.d(TAG, "RTH: " + (e == null ? "OK" : e.getDescription()))));
+    }
 
-        isMissionRunning = false;
-        if (missionRunnable != null) {
-            missionHandler.removeCallbacks(missionRunnable);
-        }
+    // =========================================================
+    // PIN YẾU: LƯU TIẾN ĐỘ ĐỂ BAY TIẾP
+    // =========================================================
+    /** max(ngưỡng người dùng đặt, mức pin drone tính là cần để về nhà + dự phòng). */
+    private int batteryThreshold(FlightControllerState st) {
+        int need = 0;
+        try {
+            if (st.getGoHomeAssessment() != null) {
+                need = st.getGoHomeAssessment().getBatteryPercentageNeededToGoHome();
+            }
+        } catch (Exception ignored) {}
+        return Math.max(lowBatteryPercent, need > 0 ? need + RTH_BATTERY_MARGIN : 0);
+    }
 
-        flightController.setVirtualStickModeEnabled(false, djiError -> {
-            flightController.startGoHome(error -> {
-                if (error == null) {
-                    Log.d(TAG, "Đã kích hoạt RTH!");
-                } else {
-                    Log.e(TAG, "RTH thất bại: " + error.getDescription());
-                }
-            });
-        });
+    /** waypoints[i] -> chỉ số trong lộ trình gốc. */
+    private int toPlanIndex(int i) {
+        return resumed ? resumeOffset + i : i;
+    }
+
+    private MissionCheckpoint saveCheckpoint(double lat, double lng, String reason) {
+        MissionCheckpoint cp = new MissionCheckpoint();
+        cp.missionId = missionId;
+        cp.waypoints = new java.util.ArrayList<>(fullPlan);
+        if (state == State.SCANNING) {
+            // Đang quét: bay tiếp từ đúng vị trí hiện tại tới waypoint đang hướng tới
+            cp.scanStarted = true;
+            cp.nextIndex = Math.min(toPlanIndex(Math.max(1, wpIndex)), fullPlan.size() - 1);
+            cp.resumeLat = lat;
+            cp.resumeLng = lng;
+        } else if (resumed) {
+            // Đang bay tiếp mà chưa tới chỗ dừng lần trước -> giữ nguyên chỗ dừng cũ
+            cp.scanStarted = true;
+            cp.nextIndex = toPlanIndex(1);
+            cp.resumeLat = waypoints.get(0).getLatitude();
+            cp.resumeLng = waypoints.get(0).getLongitude();
+        } else {
+            // Chưa bắt đầu quét -> lần sau bay lại từ đầu
+            cp.scanStarted = false;
+            cp.nextIndex = 0;
+            cp.resumeLat = fullPlan.get(0).getLatitude();
+            cp.resumeLng = fullPlan.get(0).getLongitude();
+        }
+        cp.lastShotLat = lastShotLat;
+        cp.lastShotLng = lastShotLng;
+        cp.scanAltitude = scanAlt;
+        cp.speed = cruiseSpeed;
+        cp.video = videoMode;
+        cp.photoDistance = photoDistance;
+        cp.photoCount = photoCount;
+        cp.batteryAtPause = batteryPercent;
+        cp.reason = reason;
+        cp.savedAtMs = System.currentTimeMillis();
+        cp.save(appContext);
+        Log.d(TAG, "Đã lưu tiến độ: điểm " + cp.nextIndex + "/" + fullPlan.size() + " (" + reason + ")");
+        if (listener != null) handler.post(() -> listener.onCheckpointSaved(cp));
+        return cp;
+    }
+
+    /** Ghi giờ kết thúc chuyến bay (chỉ 1 lần cho mỗi chuyến). */
+    private void endMissionLog(boolean completed) {
+        if (!missionLogOpen) return;
+        missionLogOpen = false;
+        MissionLog.end(appContext, missionId, photoCount, completed);
     }
 
     public void cancelMission() {
-        isMissionRunning = false;
-        if (missionRunnable != null) {
-            missionHandler.removeCallbacks(missionRunnable);
+        boolean wasRunning = running;
+        running = false;
+        endMissionLog(false);
+        if (loop != null) handler.removeCallbacks(loop);
+        if (wasRunning && recording && camera != null) {
+            camera.stopRecordVideo(null);
+            recording = false;
+            notifyRecording(false);
         }
-        if (flightController != null) {
-            flightController.setVirtualStickModeEnabled(false, null);
+        if (flightController != null) flightController.setVirtualStickModeEnabled(false, null);
+    }
+
+    // =========================================================
+    // TIỆN ÍCH
+    // =========================================================
+    public void setGimbalAngle(float pitchAngle) {
+        if (gimbal != null) {
+            gimbal.rotate(new Rotation.Builder().mode(RotationMode.ABSOLUTE_ANGLE).pitch(pitchAngle).time(1).build(), null);
         }
     }
 
-    private double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-        final int R = 6371000;
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
-                        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+    private void setState(State s) {
+        state = s;
+        stateStartTime = System.currentTimeMillis();
     }
 
-    private double calculateBearing(double lat1, double lon1, double lat2, double lon2) {
-        double phi1 = Math.toRadians(lat1);
-        double phi2 = Math.toRadians(lat2);
-        double deltaLambda = Math.toRadians(lon2 - lon1);
+    private void status(String s) {
+        Log.d(TAG, s);
+        if (listener != null) handler.post(() -> listener.onStatus(s));
+    }
 
-        double y = Math.sin(deltaLambda) * Math.cos(phi2);
-        double x = Math.cos(phi1) * Math.sin(phi2) -
-                Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+    private void notifyRecording(boolean rec) {
+        if (listener != null) handler.post(() -> listener.onRecordingChanged(rec));
+    }
+
+    private void progress() {
+        if (listener != null) {
+            // Báo theo chỉ số lộ trình gốc (khi bay tiếp, waypoints chỉ là phần còn lại)
+            int idx = Math.min(toPlanIndex(Math.min(wpIndex, waypoints.size())), fullPlan.size());
+            int total = fullPlan.size();
+            int pc = photoCount;
+            handler.post(() -> listener.onProgress(idx, total, pc));
+        }
+    }
+
+    private static float normalizeYaw(float y) {
+        while (y > 180) y -= 360;
+        while (y < -180) y += 360;
+        return y;
+    }
+
+    private static double bearing(double lat1, double lon1, double lat2, double lon2) {
+        double phi1 = Math.toRadians(lat1), phi2 = Math.toRadians(lat2);
+        double dl = Math.toRadians(lon2 - lon1);
+        double y = Math.sin(dl) * Math.cos(phi2);
+        double x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dl);
         return Math.toDegrees(Math.atan2(y, x));
     }
 }

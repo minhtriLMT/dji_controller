@@ -45,9 +45,18 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
+import android.util.LruCache;
+
 import dji.common.error.DJIError;
+import dji.sdk.base.BaseProduct;
 import dji.sdk.media.DownloadListener;
+import dji.sdk.media.FetchMediaTask;
+import dji.sdk.media.FetchMediaTaskContent;
+import dji.sdk.media.FetchMediaTaskScheduler;
 import dji.sdk.media.MediaFile;
+import dji.sdk.media.MediaManager;
+import dji.sdk.products.Aircraft;
+import dji.sdk.sdkmanager.DJISDKManager;
 import com.tri.djicontrol.firebase.FirebaseHelper;
 
 public class StorageAdapter extends BaseAdapter {
@@ -65,10 +74,96 @@ public class StorageAdapter extends BaseAdapter {
     private final Set<MediaFile> selectedFiles = new HashSet<>();
     private OnSelectionListener selectionListener;
 
+    // Cache thumbnail trên RAM để cuộn lưới không phải decode lại file
+    private final LruCache<String, Bitmap> memCache = new LruCache<String, Bitmap>(
+            (int) (Runtime.getRuntime().maxMemory() / 1024 / 8)) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getByteCount() / 1024;
+        }
+    };
+    // Tránh xếp hàng trùng 1 file nhiều lần khi GridView tái sử dụng view
+    private final Set<String> pendingThumbs = new HashSet<>();
+
     public StorageAdapter(Context context, List<MediaFile> mediaFiles) {
         this.context = context;
         this.mediaFiles = mediaFiles;
         this.inflater = LayoutInflater.from(context);
+    }
+
+    // =========================================================
+    // TIỆN ÍCH: SCHEDULER CỦA DJI (tải thumbnail/preview tuần tự)
+    // SDK DJI không cho gọi fetchThumbnail/fetchPreview song song -> báo bận, ảnh trống.
+    // =========================================================
+    public static FetchMediaTaskScheduler getScheduler() {
+        try {
+            BaseProduct product = DJISDKManager.getInstance().getProduct();
+            if (product instanceof Aircraft && ((Aircraft) product).getCamera() != null) {
+                MediaManager mm = ((Aircraft) product).getCamera().getMediaManager();
+                if (mm != null) return mm.getScheduler();
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    public static void resumeScheduler() {
+        FetchMediaTaskScheduler scheduler = getScheduler();
+        if (scheduler != null) {
+            try { scheduler.resume(null); } catch (Exception ignored) {}
+        }
+    }
+
+    /** Tạm dừng scheduler trước khi tải file gốc (fetchFileData), sau đó chạy then. */
+    public static void suspendScheduler(Runnable then) {
+        FetchMediaTaskScheduler scheduler = getScheduler();
+        Handler main = new Handler(Looper.getMainLooper());
+        if (scheduler == null) {
+            main.post(then);
+            return;
+        }
+        try {
+            scheduler.suspend(error -> main.postDelayed(then, 200));
+        } catch (Exception e) {
+            main.post(then);
+        }
+    }
+
+    // =========================================================
+    // TIỆN ÍCH: TÌM FILE THỰC SỰ SAU KHI fetchFileData
+    // SDK tự thêm phần mở rộng vào tên file và onSuccess có thể trả về thư mục,
+    // nên không được giả định đường dẫn = destDir/fileName.
+    // =========================================================
+    public static String baseName(String fileName) {
+        if (fileName == null) return null;
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
+    }
+
+    public static File resolveDownloadedFile(File dir, String fileName, String returnedPath) {
+        if (returnedPath != null && !returnedPath.isEmpty()) {
+            File f = new File(returnedPath);
+            if (f.isFile() && f.length() > 0) return f;
+        }
+        if (dir == null || fileName == null) return null;
+        File exact = new File(dir, fileName);
+        if (exact.isFile() && exact.length() > 0) return exact;
+
+        String base = baseName(fileName).toLowerCase(Locale.US);
+        File best = null;
+        File[] list = dir.listFiles();
+        if (list != null) {
+            for (File f : list) {
+                String n = f.getName().toLowerCase(Locale.US);
+                if (f.isFile() && f.length() > 0 && (n.equals(base) || n.startsWith(base + "."))) {
+                    if (best == null || f.lastModified() > best.lastModified()) best = f;
+                }
+            }
+        }
+        return best;
+    }
+
+    private static String thumbKey(MediaFile f) {
+        return f.getFileName() + "_" + f.getTimeCreated();
     }
 
     public void setOnSelectionListener(OnSelectionListener listener) {
@@ -141,12 +236,15 @@ public class StorageAdapter extends BaseAdapter {
         MediaFile.MediaType type = mediaFile.getMediaType();
         boolean isVideo = (type == MediaFile.MediaType.MOV || type == MediaFile.MediaType.MP4);
         tvMediaType.setText(isVideo ? "VIDEO" : "ẢNH");
+        tvMediaType.setBackgroundResource(isVideo ? R.drawable.bg_st_badge_video : R.drawable.bg_st_badge_photo);
+        View playOverlay = view.findViewById(R.id.tvPlayOverlay);
+        if (playOverlay != null) playOverlay.setVisibility(isVideo ? View.VISIBLE : View.GONE);
 
         String dateCreated = mediaFile.getDateCreated();
         if (dateCreated != null && !dateCreated.isEmpty()) {
             try {
                 SimpleDateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd kk:mm:ss", Locale.US);
-                SimpleDateFormat outputFormat = new SimpleDateFormat("dd/MM/yyyy - HH:mm:ss", Locale.US);
+                SimpleDateFormat outputFormat = new SimpleDateFormat("dd/MM/yyyy • HH:mm", Locale.US);
                 Date date = inputFormat.parse(dateCreated);
                 tvMediaDate.setText(date != null ? outputFormat.format(date) : dateCreated);
             } catch (Exception e) {
@@ -163,34 +261,34 @@ public class StorageAdapter extends BaseAdapter {
                 cbSelect.setVisibility(View.VISIBLE);
                 cbSelect.setChecked(isSelected);
             }
-            if (itemRoot != null) {
-                itemRoot.setBackgroundColor(isSelected ? Color.parseColor("#4A148C") : Color.parseColor("#30343B"));
-            }
+            if (itemRoot != null) itemRoot.setSelected(isSelected); // viền xanh (bg_st_item)
         } else {
             if (cbSelect != null) {
                 cbSelect.setVisibility(View.GONE);
             }
-            if (itemRoot != null) {
-                itemRoot.setBackgroundColor(Color.parseColor("#30343B"));
-            }
+            if (itemRoot != null) itemRoot.setSelected(false);
         }
 
-        imgMedia.setImageResource(android.R.color.darker_gray);
+        imgMedia.setImageDrawable(null); // nền tối của khung thumbnail hiện trong lúc chờ tải
         imgMedia.setTag(mediaFile);
 
-        // Nạp Thumbnail cực nhanh (1. RAM -> 2. Disk Cache cục bộ -> 3. Tải từ Drone)
-        Bitmap thumbnail = mediaFile.getThumbnail();
+        // Nạp Thumbnail (1. RAM -> 2. Disk Cache cục bộ -> 3. Xếp hàng tải từ Drone)
+        String key = thumbKey(mediaFile);
+        Bitmap thumbnail = memCache.get(key);
+        if (thumbnail == null) thumbnail = mediaFile.getThumbnail();
         if (thumbnail != null) {
+            memCache.put(key, thumbnail);
             imgMedia.setImageBitmap(thumbnail);
         } else {
-            File thumbCacheFile = new File(context.getExternalCacheDir(), "thumb_" + mediaFile.getFileName() + ".jpg");
+            File cacheDir = context.getExternalCacheDir() != null ? context.getExternalCacheDir() : context.getCacheDir();
+            File thumbCacheFile = new File(cacheDir, "thumb_" + mediaFile.getFileName() + "_" + mediaFile.getTimeCreated() + ".jpg");
+            Bitmap cachedBitmap = null;
             if (thumbCacheFile.exists() && thumbCacheFile.length() > 0) {
-                Bitmap cachedBitmap = BitmapFactory.decodeFile(thumbCacheFile.getAbsolutePath());
-                if (cachedBitmap != null) {
-                    imgMedia.setImageBitmap(cachedBitmap);
-                } else {
-                    fetchThumbnailFromDrone(mediaFile, thumbCacheFile, imgMedia);
-                }
+                cachedBitmap = BitmapFactory.decodeFile(thumbCacheFile.getAbsolutePath());
+            }
+            if (cachedBitmap != null) {
+                memCache.put(key, cachedBitmap);
+                imgMedia.setImageBitmap(cachedBitmap);
             } else {
                 fetchThumbnailFromDrone(mediaFile, thumbCacheFile, imgMedia);
             }
@@ -228,99 +326,122 @@ public class StorageAdapter extends BaseAdapter {
     }
 
     private void fetchThumbnailFromDrone(MediaFile mediaFile, File thumbCacheFile, ImageView imgMedia) {
-        mediaFile.fetchThumbnail(error -> {
-            if (error == null) {
-                Bitmap bitmap = mediaFile.getThumbnail();
-                if (bitmap != null) {
-                    try (java.io.FileOutputStream out = new java.io.FileOutputStream(thumbCacheFile)) {
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out);
-                    } catch (Exception ignored) {}
+        String key = thumbKey(mediaFile);
+        synchronized (pendingThumbs) {
+            if (!pendingThumbs.add(key)) return; // đã xếp hàng, chờ callback
+        }
 
-                    imgMedia.post(() -> {
-                        if (imgMedia.getTag() == mediaFile) {
-                            imgMedia.setImageBitmap(bitmap);
-                        }
-                    });
-                }
+        Runnable onDone = () -> {
+            synchronized (pendingThumbs) {
+                pendingThumbs.remove(key);
             }
-        });
+            Bitmap bitmap = mediaFile.getThumbnail();
+            if (bitmap == null) return;
+            memCache.put(key, bitmap);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(thumbCacheFile)) {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out);
+            } catch (Exception ignored) {}
+
+            // Tag của ImageView đổi khi view bị tái sử dụng -> chỉ set nếu vẫn đúng file
+            imgMedia.post(() -> {
+                if (imgMedia.getTag() == mediaFile) {
+                    imgMedia.setImageBitmap(bitmap);
+                }
+            });
+        };
+
+        FetchMediaTaskScheduler scheduler = getScheduler();
+        if (scheduler != null) {
+            scheduler.resume(null);
+            scheduler.moveTaskToEnd(new FetchMediaTask(mediaFile, FetchMediaTaskContent.THUMBNAIL,
+                    (file, option, error) -> {
+                        if (error != null) {
+                            synchronized (pendingThumbs) { pendingThumbs.remove(key); }
+                            return;
+                        }
+                        onDone.run();
+                    }));
+        } else {
+            mediaFile.fetchThumbnail(error -> {
+                if (error != null) {
+                    synchronized (pendingThumbs) { pendingThumbs.remove(key); }
+                    return;
+                }
+                onDone.run();
+            });
+        }
     }
 
     // =========================================================
     // 1. HÀM XEM ẢNH TỐC ĐỘ CAO (DÙNG PREVIEW IMAGE / THUMBNAIL FALLBACK)
     // =========================================================
     private void showImageDialog(Context context, MediaFile mediaFile) {
-        Dialog dialog = new Dialog(context);
+        Dialog dialog = new Dialog(context, R.style.CfViewer);
+        dialog.setContentView(R.layout.dialog_media_viewer);
+        setupViewerHeader(dialog, mediaFile.getFileName(), formatMediaSubtitle(mediaFile), false);
+        ((TextView) dialog.findViewById(R.id.viewerHint))
+                .setText("Đang xem bản xem trước • Tải về máy để có ảnh gốc độ phân giải đầy đủ");
 
-        LinearLayout rootLayout = new LinearLayout(context);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(Color.BLACK);
-        rootLayout.setPadding(10, 10, 10, 10);
+        // Lớp chờ: chỉ hiện vòng xoay trên nền trong suốt để vẫn thấy ảnh thu nhỏ phía sau
+        View progressBar = dialog.findViewById(R.id.viewerLoading);
+        progressBar.setBackgroundColor(Color.TRANSPARENT);
+        progressBar.setVisibility(View.VISIBLE);
+        ((TextView) dialog.findViewById(R.id.viewerLoadingTitle)).setText("Đang tải ảnh xem trước...");
 
-        ProgressBar progressBar = new ProgressBar(context);
-        LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        progressParams.gravity = android.view.Gravity.CENTER;
-        progressBar.setLayoutParams(progressParams);
-
-        ImageView imageView = new ImageView(context);
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        LinearLayout.LayoutParams imgParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        imageView.setLayoutParams(imgParams);
-        imageView.setOnClickListener(v -> dialog.dismiss());
+        ImageView imageView = dialog.findViewById(R.id.viewerImage);
 
         // Hiện Thumbnail tạm thời trong khi chờ
         if (mediaFile.getThumbnail() != null) {
             imageView.setImageBitmap(mediaFile.getThumbnail());
         }
 
-        // Tải ảnh Preview sắc nét nhưng dung lượng nhẹ (Load cực nhanh)
-        mediaFile.fetchPreview(error -> {
-            if (error == null && mediaFile.getPreview() != null) {
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    imageView.setImageBitmap(mediaFile.getPreview());
-                });
+        // Tải ảnh Preview (ưu tiên lên đầu hàng đợi của scheduler, không chạy song song với thumbnail)
+        Handler main = new Handler(Looper.getMainLooper());
+        Runnable showThumbFallback = () -> main.post(() -> {
+            progressBar.setVisibility(View.GONE);
+            Bitmap thumb = memCache.get(thumbKey(mediaFile));
+            if (thumb == null) thumb = mediaFile.getThumbnail();
+            if (thumb != null) {
+                imageView.setImageBitmap(thumb);
             } else {
-                // Nếu camera không hỗ trợ Preview (như dòng Mini/Air/Phantom cũ), sử dụng Thumbnail
-                mediaFile.fetchThumbnail(thumbError -> {
-                    new Handler(Looper.getMainLooper()).post(() -> {
-                        progressBar.setVisibility(View.GONE);
-                        if (mediaFile.getThumbnail() != null) {
-                            imageView.setImageBitmap(mediaFile.getThumbnail());
-                        } else {
-                            Toast.makeText(context, "Ảnh lỗi hoặc không thể xem trước!", Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                });
+                Toast.makeText(context, "Ảnh lỗi hoặc không thể xem trước!", Toast.LENGTH_SHORT).show();
             }
         });
 
-        LinearLayout btnLayout = new LinearLayout(context);
-        btnLayout.setOrientation(LinearLayout.HORIZONTAL);
-        btnLayout.setPadding(20, 20, 20, 20);
+        FetchMediaTaskScheduler scheduler = getScheduler();
+        if (scheduler != null) {
+            scheduler.resume(null);
+            scheduler.moveTaskToNext(new FetchMediaTask(mediaFile, FetchMediaTaskContent.PREVIEW,
+                    (file, option, error) -> {
+                        if (error == null && mediaFile.getPreview() != null) {
+                            main.post(() -> {
+                                progressBar.setVisibility(View.GONE);
+                                imageView.setImageBitmap(mediaFile.getPreview());
+                            });
+                        } else {
+                            // Camera không hỗ trợ Preview -> lấy Thumbnail
+                            scheduler.moveTaskToNext(new FetchMediaTask(mediaFile, FetchMediaTaskContent.THUMBNAIL,
+                                    (f2, o2, e2) -> showThumbFallback.run()));
+                        }
+                    }));
+        } else {
+            mediaFile.fetchPreview(error -> {
+                if (error == null && mediaFile.getPreview() != null) {
+                    main.post(() -> {
+                        progressBar.setVisibility(View.GONE);
+                        imageView.setImageBitmap(mediaFile.getPreview());
+                    });
+                } else {
+                    mediaFile.fetchThumbnail(thumbError -> showThumbFallback.run());
+                }
+            });
+        }
 
-        Button btnDownload = new Button(context);
-        btnDownload.setText("TẢI VỀ MÁY");
-        btnDownload.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        Button btnDownload = dialog.findViewById(R.id.viewerBtnDownload);
+        Button btnFirebase = dialog.findViewById(R.id.viewerBtnCloud);
 
-        Button btnFirebase = new Button(context);
-        btnFirebase.setText("TẢI LÊN FIREBASE");
-        btnFirebase.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        btnLayout.addView(btnDownload);
-        btnLayout.addView(btnFirebase);
-
-        rootLayout.addView(progressBar);
-        rootLayout.addView(imageView);
-        rootLayout.addView(btnLayout);
-
-        dialog.setContentView(rootLayout);
-
-        File destDir = new File(context.getExternalFilesDir(null), "DJI_Downloads");
-        if (!destDir.exists()) destDir.mkdirs();
-        File downloadedFile = new File(destDir, mediaFile.getFileName());
+        // Lưu file thực tế đã tải về (để nút Firebase dùng đúng đường dẫn)
+        final File[] downloadedFile = {null};
 
         btnDownload.setOnClickListener(v -> {
             // 1. Tạo thư mục công khai DCIM/DJI_Photos để lưu vào Bộ sưu tập điện thoại
@@ -341,12 +462,21 @@ public class StorageAdapter extends BaseAdapter {
             final File finalDownloadDir = downloadDir;
             String fileName = mediaFile.getFileName();
 
-            Toast.makeText(context, "Đang tải ảnh gốc về máy...", Toast.LENGTH_SHORT).show();
+            // Đã tải trước đó rồi thì không tải lại
+            File existing = resolveDownloadedFile(finalDownloadDir, fileName, null);
+            if (existing != null && (mediaFile.getFileSize() <= 0 || existing.length() >= mediaFile.getFileSize())) {
+                downloadedFile[0] = existing;
+                processAndShowMetadata(context, existing.getAbsolutePath(), false);
+                return;
+            }
 
-            // 2. Tiến hành tải file gốc từ Drone về thư mục
-            mediaFile.fetchFileData(
+            Toast.makeText(context, "Đang tải ảnh gốc về máy...", Toast.LENGTH_SHORT).show();
+            btnDownload.setEnabled(false);
+
+            // 2. Dừng hàng đợi thumbnail rồi mới tải file gốc (tránh lỗi drone "bận")
+            suspendScheduler(() -> mediaFile.fetchFileData(
                     finalDownloadDir,
-                    fileName,
+                    baseName(fileName), // SDK tự thêm phần mở rộng
                     new DownloadListener<String>() {
                         @Override public void onStart() {}
                         @Override public void onRateUpdate(long total, long current, long persize) {}
@@ -354,147 +484,115 @@ public class StorageAdapter extends BaseAdapter {
 
                         @Override
                         public void onSuccess(String filePath) {
-                            new Handler(Looper.getMainLooper()).post(() -> {
-                                Toast.makeText(context, "Đã tải xong! Đang lưu vào Bộ sưu tập...", Toast.LENGTH_SHORT).show();
-
-                                if (filePath != null) {
-                                    // Kích hoạt MediaScanner để Thư viện ảnh / Gallery điện thoại nhận diện ngay
-                                    MediaScannerConnection.scanFile(
-                                            context,
-                                            new String[]{filePath},
-                                            null,
-                                            null
-                                    );
-                                    // Đọc thông tin EXIF và hiển thị thông báo
-                                    processAndShowMetadata(context, filePath, false);
+                            resumeScheduler();
+                            File realFile = resolveDownloadedFile(finalDownloadDir, fileName, filePath);
+                            main.post(() -> {
+                                btnDownload.setEnabled(true);
+                                if (realFile == null) {
+                                    Toast.makeText(context, "Tải xong nhưng không tìm thấy file trong " + finalDownloadDir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                                    return;
                                 }
+                                downloadedFile[0] = realFile;
+                                // Ghi nhận vào Bộ sưu tập + đọc EXIF
+                                processAndShowMetadata(context, realFile.getAbsolutePath(), false);
                             });
                         }
 
                         @Override
                         public void onFailure(DJIError djiError) {
-                            new Handler(Looper.getMainLooper()).post(() ->
-                                    Toast.makeText(context, "Lỗi tải file: " + djiError.getDescription(), Toast.LENGTH_SHORT).show()
-                            );
+                            resumeScheduler();
+                            main.post(() -> {
+                                btnDownload.setEnabled(true);
+                                Toast.makeText(context, "Lỗi tải file: " + (djiError != null ? djiError.getDescription() : "Thất bại"), Toast.LENGTH_SHORT).show();
+                            });
                         }
 
                         @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
                     }
-            );
+            ));
         });
 
-        btnFirebase.setOnClickListener(v -> {
-            if (downloadedFile.exists()) {
-                processAndShowMetadata(context, downloadedFile.getAbsolutePath(), true);
-            } else {
-                Toast.makeText(context, "Ấn 'TẢI VỀ MÁY' trước khi đưa lên Firebase!", Toast.LENGTH_SHORT).show();
-            }
-        });
+        // Đẩy thẳng lên Firebase: nếu chưa tải về máy thì tự tải từ drone trước
+        btnFirebase.setOnClickListener(v -> startFirebaseUpload(context, mediaFile, btnFirebase, "Lên Cloud"));
 
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawableResource(android.R.color.black);
-            dialog.getWindow().setLayout(
-                    (int) (context.getResources().getDisplayMetrics().widthPixels * 0.90),
-                    (int) (context.getResources().getDisplayMetrics().heightPixels * 0.85)
-            );
-        }
         dialog.show();
+    }
+
+    /** Thanh trên của trình xem: nút đóng, tên file, dòng phụ và nhãn ẢNH/VIDEO. */
+    static void setupViewerHeader(Dialog dialog, String title, String subtitle, boolean video) {
+        ((TextView) dialog.findViewById(R.id.viewerTitle)).setText(title);
+        ((TextView) dialog.findViewById(R.id.viewerSubtitle)).setText(subtitle);
+        TextView chip = dialog.findViewById(R.id.viewerTypeChip);
+        chip.setText(video ? "VIDEO" : "ẢNH");
+        chip.setBackgroundResource(video ? R.drawable.bg_st_badge_video : R.drawable.bg_st_badge_photo);
+        dialog.findViewById(R.id.viewerClose).setOnClickListener(v -> dialog.dismiss());
+    }
+
+    /** "22/11/2026 • 10:15 • 5.2 MB" (+ thời lượng nếu là video). */
+    private static String formatMediaSubtitle(MediaFile mediaFile) {
+        StringBuilder sb = new StringBuilder();
+        String created = mediaFile.getDateCreated();
+        if (created != null && !created.isEmpty()) {
+            try {
+                Date d = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).parse(created);
+                sb.append(d != null ? new SimpleDateFormat("dd/MM/yyyy • HH:mm", Locale.US).format(d) : created);
+            } catch (Exception e) {
+                sb.append(created);
+            }
+        }
+        long size = mediaFile.getFileSize();
+        if (size > 0) {
+            if (sb.length() > 0) sb.append(" • ");
+            sb.append(String.format(Locale.US, "%.1f MB", size / 1048576.0));
+        }
+        MediaFile.MediaType type = mediaFile.getMediaType();
+        if (type == MediaFile.MediaType.MOV || type == MediaFile.MediaType.MP4) {
+            int sec = Math.round(mediaFile.getDurationInSeconds());
+            if (sec > 0) {
+                if (sb.length() > 0) sb.append(" • ");
+                sb.append(String.format(Locale.US, "%d:%02d", sec / 60, sec % 60));
+            }
+        }
+        return sb.toString();
     }
 
     // =========================================================
     // HÀM PHÁT VIDEO TRỰC TIẾP VỚI BỘ ĐẾM TIẾN TRÌNH & PROGRESS BAR UI
     // =========================================================
     private void showVideoDialog(Context context, MediaFile mediaFile) {
-        Dialog dialog = new Dialog(context);
+        Dialog dialog = new Dialog(context, R.style.CfViewer);
+        dialog.setContentView(R.layout.dialog_media_viewer);
+        setupViewerHeader(dialog, mediaFile.getFileName(), formatMediaSubtitle(mediaFile), true);
+        ((TextView) dialog.findViewById(R.id.viewerHint))
+                .setText("Video được nạp từ thẻ nhớ drone về máy rồi mới phát");
 
-        LinearLayout rootLayout = new LinearLayout(context);
-        rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(android.graphics.Color.BLACK);
-        rootLayout.setPadding(20, 20, 20, 20);
+        dialog.findViewById(R.id.viewerImage).setVisibility(View.GONE);
 
-        // Khung FrameLayout chứa VideoView ở dưới và Loading Overlay ở trên
-        FrameLayout videoContainer = new FrameLayout(context);
-        LinearLayout.LayoutParams containerParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f);
-        videoContainer.setLayoutParams(containerParams);
-
-        // 1. VideoView (Hiển thị ngay từ đầu để SurfaceHolder khởi tạo sẵn)
-        VideoView videoView = new VideoView(context);
-        FrameLayout.LayoutParams videoParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        videoView.setLayoutParams(videoParams);
-
+        // 1. VideoView (hiện ngay từ đầu để SurfaceHolder khởi tạo sẵn)
+        VideoView videoView = dialog.findViewById(R.id.viewerVideo);
+        videoView.setVisibility(View.VISIBLE);
         MediaController mediaController = new MediaController(context);
         mediaController.setAnchorView(videoView);
         videoView.setMediaController(mediaController);
 
-        // 2. Loading Overlay đè lên trên VideoView trong khi tải
-        LinearLayout loadingLayout = new LinearLayout(context);
-        loadingLayout.setOrientation(LinearLayout.VERTICAL);
-        loadingLayout.setGravity(android.view.Gravity.CENTER);
-        loadingLayout.setBackgroundColor(android.graphics.Color.BLACK);
-        FrameLayout.LayoutParams loadingParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        loadingLayout.setLayoutParams(loadingParams);
-
-        TextView tvTitle = new TextView(context);
-        tvTitle.setText("Đang tải video từ máy bay: " + mediaFile.getFileName());
-        tvTitle.setTextColor(android.graphics.Color.WHITE);
-        tvTitle.setTextSize(15);
-        tvTitle.setGravity(android.view.Gravity.CENTER);
-        tvTitle.setPadding(0, 0, 0, 15);
-
-        ProgressBar progressBar = new ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(100);
+        // 2. Lớp chờ tải đè lên VideoView: thanh tiến trình + dung lượng + tốc độ
+        LinearLayout loadingLayout = dialog.findViewById(R.id.viewerLoading);
+        loadingLayout.setVisibility(View.VISIBLE);
+        dialog.findViewById(R.id.viewerSpinner).setVisibility(View.GONE);
+        TextView tvTitle = dialog.findViewById(R.id.viewerLoadingTitle);
+        tvTitle.setText("Đang nạp video từ drone");
+        ProgressBar progressBar = dialog.findViewById(R.id.viewerProgress);
+        progressBar.setVisibility(View.VISIBLE);
         progressBar.setProgress(0);
-        LinearLayout.LayoutParams pbParams = new LinearLayout.LayoutParams(
-                (int) (context.getResources().getDisplayMetrics().widthPixels * 0.70),
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        progressBar.setLayoutParams(pbParams);
-
-        TextView tvProgressText = new TextView(context);
+        TextView tvProgressText = dialog.findViewById(R.id.viewerProgressText);
         tvProgressText.setText("0.0 MB / 0.0 MB (0%)");
-        tvProgressText.setTextColor(android.graphics.Color.LTGRAY);
-        tvProgressText.setTextSize(13);
-        tvProgressText.setGravity(android.view.Gravity.CENTER);
-        tvProgressText.setPadding(0, 10, 0, 0);
+        Button btnRetry = dialog.findViewById(R.id.viewerRetry);
 
-        Button btnRetry = new Button(context);
-        btnRetry.setText("THỬ NẠP LẠI VIDEO");
-        btnRetry.setVisibility(View.GONE);
-        LinearLayout.LayoutParams retryParams = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        retryParams.gravity = android.view.Gravity.CENTER;
-        retryParams.topMargin = 20;
-        btnRetry.setLayoutParams(retryParams);
-
-        loadingLayout.addView(tvTitle);
-        loadingLayout.addView(progressBar);
-        loadingLayout.addView(tvProgressText);
-        loadingLayout.addView(btnRetry);
-
-        videoContainer.addView(videoView);
-        videoContainer.addView(loadingLayout);
-
-        // 3. Thanh nút bấm ở dưới cùng
-        LinearLayout btnLayout = new LinearLayout(context);
-        btnLayout.setOrientation(LinearLayout.HORIZONTAL);
-        btnLayout.setPadding(0, 15, 0, 0);
-
-        Button btnDownload = new Button(context);
-        btnDownload.setText("TẢI VỀ MÁY");
-        btnDownload.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        Button btnExternal = new Button(context);
-        btnExternal.setText("MỞ BẰNG TRÌNH PHÁT NGOÀI");
-        btnExternal.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        btnLayout.addView(btnDownload);
-        btnLayout.addView(btnExternal);
-
-        rootLayout.addView(videoContainer);
-        rootLayout.addView(btnLayout);
-        dialog.setContentView(rootLayout);
+        // 3. Thanh nút dưới
+        Button btnDownload = dialog.findViewById(R.id.viewerBtnDownload);
+        Button btnExternal = dialog.findViewById(R.id.viewerBtnExternal);
+        btnExternal.setVisibility(View.VISIBLE);
+        Button btnVideoFirebase = dialog.findViewById(R.id.viewerBtnCloud);
 
         File destDir = new File(context.getExternalFilesDir(null), "DJI_Video_Cache");
         if (!destDir.exists()) destDir.mkdirs();
@@ -505,27 +603,23 @@ public class StorageAdapter extends BaseAdapter {
         );
         if (!publicDir.exists()) publicDir.mkdirs();
 
-        File publicVideoFile = new File(publicDir, mediaFile.getFileName());
         File localVideoFile = new File(destDir, mediaFile.getFileName());
 
         long expectedSize = mediaFile.getFileSize();
 
         // Kiểm tra xem file đã có trong bộ sưu tập công khai DCIM hoặc bộ nhớ cache chưa
-        boolean existsInPublic = publicVideoFile.exists() && publicVideoFile.length() > 0
-                && (expectedSize > 0 ? publicVideoFile.length() >= expectedSize : publicVideoFile.length() > 2 * 1024 * 1024);
-
-        boolean existsInCache = localVideoFile.exists() && localVideoFile.length() > 0
-                && (expectedSize > 0 ? localVideoFile.length() >= expectedSize : localVideoFile.length() > 2 * 1024 * 1024);
+        // (tên file thực tế có thể khác hoa/thường phần mở rộng -> dùng resolveDownloadedFile)
+        File publicFound = resolveDownloadedFile(publicDir, mediaFile.getFileName(), null);
+        File cacheFound = resolveDownloadedFile(destDir, mediaFile.getFileName(), null);
 
         File readyFile = null;
-        if (existsInPublic) {
-            readyFile = publicVideoFile;
-        } else if (existsInCache) {
-            readyFile = localVideoFile;
-        } else {
-            // Xóa file dở dang nếu có
-            if (localVideoFile.exists()) localVideoFile.delete();
-            if (publicVideoFile.exists()) publicVideoFile.delete();
+        if (isCompleteVideo(publicFound, expectedSize)) {
+            readyFile = publicFound;
+        } else if (isCompleteVideo(cacheFound, expectedSize)) {
+            readyFile = cacheFound;
+        } else if (cacheFound != null) {
+            // Xóa file dở dang trong cache (không đụng vào file của người dùng trong DCIM)
+            cacheFound.delete();
         }
 
         boolean isCached = (readyFile != null);
@@ -590,6 +684,14 @@ public class StorageAdapter extends BaseAdapter {
 
         btnDownload.setOnClickListener(v -> copyToGalleryAction.run());
 
+        btnVideoFirebase.setOnClickListener(v -> {
+            if (isDownloading[0]) {
+                Toast.makeText(context, "Vui lòng đợi nạp xong video từ drone!", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            startFirebaseUpload(context, mediaFile, btnVideoFirebase, "Lên Cloud");
+        });
+
         btnExternal.setOnClickListener(v -> {
             File currentFile = new File(playFilePath.get());
             if (currentFile.exists() && currentFile.length() > 0) {
@@ -606,8 +708,9 @@ public class StorageAdapter extends BaseAdapter {
                 tvProgressText.setText("Bắt đầu nạp video từ drone...");
                 isDownloading[0] = true;
 
-                // Tải vào destDir (app-internal external storage) để đảm bảo 100% không bị chặn bởi Scoped Storage Android 13
-                mediaFile.fetchFileData(destDir, mediaFile.getFileName(), new DownloadListener<String>() {
+                // Tải vào destDir (app-internal external storage) để không bị chặn bởi Scoped Storage.
+                // Dừng scheduler thumbnail trước, nếu không drone sẽ báo bận và video không tải được.
+                suspendScheduler(() -> mediaFile.fetchFileData(destDir, baseName(mediaFile.getFileName()), new DownloadListener<String>() {
                     private long lastTime = System.currentTimeMillis();
                     private long lastBytes = 0;
 
@@ -643,15 +746,24 @@ public class StorageAdapter extends BaseAdapter {
                     @Override
                     public void onSuccess(String filePath) {
                         isDownloading[0] = false;
-                        if (filePath != null && !filePath.isEmpty()) {
-                            playFilePath.set(filePath);
+                        resumeScheduler();
+                        // filePath có thể là thư mục -> tìm đúng file video vừa tải
+                        File realFile = resolveDownloadedFile(destDir, mediaFile.getFileName(), filePath);
+                        if (realFile == null) {
+                            new Handler(Looper.getMainLooper()).post(() -> {
+                                tvProgressText.setText("Tải xong nhưng không tìm thấy file video!");
+                                btnRetry.setVisibility(View.VISIBLE);
+                            });
+                            return;
                         }
+                        playFilePath.set(realFile.getAbsolutePath());
                         playVideoAction.run();
                     }
 
                     @Override
                     public void onFailure(DJIError error) {
                         isDownloading[0] = false;
+                        resumeScheduler();
                         new Handler(Looper.getMainLooper()).post(() -> {
                             tvProgressText.setText("Lỗi nạp video: " + (error != null ? error.getDescription() : "Thất bại"));
                             btnRetry.setVisibility(View.VISIBLE);
@@ -659,7 +771,7 @@ public class StorageAdapter extends BaseAdapter {
                     }
 
                     @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
-                });
+                }));
             }
         };
 
@@ -678,21 +790,44 @@ public class StorageAdapter extends BaseAdapter {
         }
 
         dialog.setOnDismissListener(d -> {
+            try { videoView.stopPlayback(); } catch (Exception ignored) {}
             if (isDownloading[0]) {
                 try {
                     mediaFile.stopFetchingFileData(null);
                 } catch (Exception ignored) {}
+                isDownloading[0] = false;
             }
+            resumeScheduler();
         });
 
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawableResource(android.R.color.black);
-            dialog.getWindow().setLayout(
-                    (int) (context.getResources().getDisplayMetrics().widthPixels * 0.90),
-                    (int) (context.getResources().getDisplayMetrics().heightPixels * 0.85)
-            );
-        }
         dialog.show();
+    }
+
+    /** Gắn tiến trình upload vào chữ trên nút, khoá nút trong lúc chạy. */
+    private void startFirebaseUpload(Context context, MediaFile mediaFile, Button button, String idleText) {
+        button.setEnabled(false);
+        button.setText("ĐANG CHUẨN BỊ...");
+        uploadMediaToFirebase(context, mediaFile, new FirebaseUploadListener() {
+            @Override
+            public void onStatus(String status) {
+                // Nút nhỏ: chỉ hiện phần trăm
+                String shortText = status.startsWith("Tải từ drone") ? "TẢI TỪ DRONE" : "CLOUD";
+                String pct = status.replaceAll(".*?(\\d+%).*", "$1");
+                button.setText(pct.endsWith("%") ? shortText + " " + pct : shortText + "...");
+            }
+
+            @Override
+            public void onDone(boolean success, String message) {
+                button.setEnabled(true);
+                button.setText(success ? "ĐÃ LÊN CLOUD ✓" : idleText);
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private static boolean isCompleteVideo(File f, long expectedSize) {
+        if (f == null || !f.isFile() || f.length() <= 0) return false;
+        return expectedSize > 0 ? f.length() >= expectedSize : f.length() > 2 * 1024 * 1024;
     }
 
     // Mở bằng Trình phát Video ngoài của hệ điều hành điện thoại
@@ -759,7 +894,8 @@ public class StorageAdapter extends BaseAdapter {
 
             if (!forFirebase) {
                 // Đăng ký file với MediaScanner của Android để Album điện thoại nhận diện ngay
-                boolean isVideo = filePath.endsWith(".mp4") || filePath.endsWith(".mov");
+                String lower = filePath.toLowerCase(Locale.US);
+                boolean isVideo = lower.endsWith(".mp4") || lower.endsWith(".mov");
                 MediaScannerConnection.scanFile(
                         context,
                         new String[]{sourceFile.getAbsolutePath()},
@@ -774,5 +910,138 @@ public class StorageAdapter extends BaseAdapter {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    // =========================================================
+    // ĐẨY FILE TỪ KHO LƯU TRỮ DRONE LÊN FIREBASE
+    // Tự tìm bản đã tải về máy; chưa có thì tải từ drone về thư mục app rồi upload.
+    // =========================================================
+    public interface FirebaseUploadListener {
+        void onStatus(String status);          // "Đang tải từ drone 40%", "Đang đẩy lên Firebase 60%"...
+        void onDone(boolean success, String message);
+    }
+
+    /** Tìm bản sao đầy đủ của mediaFile đã có trên điện thoại (DCIM hoặc cache của app). */
+    public static File findLocalCopy(Context context, MediaFile mediaFile) {
+        String name = mediaFile.getFileName();
+        long expected = mediaFile.getFileSize();
+        File dcim = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM);
+        File[] dirs = {
+                new File(dcim, "DJI_Photos"),
+                new File(dcim, "DJI_Videos"),
+                new File(context.getExternalFilesDir(null), "DJI_Video_Cache"),
+                new File(context.getExternalFilesDir(null), "DJI_Downloads"),
+                new File(context.getExternalFilesDir(null), "DJI_Upload")
+        };
+        for (File dir : dirs) {
+            File f = resolveDownloadedFile(dir, name, null);
+            if (f != null && (expected <= 0 || f.length() >= expected)) return f;
+        }
+        return null;
+    }
+
+    /** Thông tin kèm theo file (thời gian chụp + GPS nếu là ảnh có EXIF). Không bao giờ ném lỗi. */
+    public static String buildMetaInfo(File file, MediaFile mediaFile) {
+        String displayTime = mediaFile != null && mediaFile.getDateCreated() != null
+                ? mediaFile.getDateCreated() : "Không xác định";
+        String gpsInfo = "Chưa lưu GPS";
+        String lower = file.getName().toLowerCase(Locale.US);
+        boolean isVideo = lower.endsWith(".mp4") || lower.endsWith(".mov");
+        if (!isVideo) {
+            try {
+                ExifInterface exif = new ExifInterface(file.getAbsolutePath());
+                String dateTime = exif.getAttribute(ExifInterface.TAG_DATETIME);
+                if (dateTime != null) {
+                    SimpleDateFormat exifFormat = new SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US);
+                    SimpleDateFormat newFormat = new SimpleDateFormat("EEEE, 'ngày' dd/MM/yyyy 'lúc' HH:mm:ss", new Locale("vi", "VN"));
+                    Date d = exifFormat.parse(dateTime);
+                    if (d != null) displayTime = newFormat.format(d);
+                }
+                float[] latLong = new float[2];
+                if (exif.getLatLong(latLong)) {
+                    gpsInfo = String.format(Locale.US, "Vĩ độ: %.6f\nKinh độ: %.6f", latLong[0], latLong[1]);
+                }
+            } catch (Exception ignored) {}
+        }
+        return "Loại: " + (isVideo ? "Video" : "Ảnh") + "\nThời gian chụp: " + displayTime + "\n" + gpsInfo;
+    }
+
+    public static void uploadMediaToFirebase(Context context, MediaFile mediaFile, FirebaseUploadListener listener) {
+        Handler main = new Handler(Looper.getMainLooper());
+        if (!FirebaseHelper.isConfigured(context)) {
+            main.post(() -> listener.onDone(false,
+                    "Chưa cấu hình Cloud: điền CLOUD_NAME và UPLOAD_PRESET trong CloudConfig.java"));
+            return;
+        }
+
+        File local = findLocalCopy(context, mediaFile);
+        if (local != null) {
+            uploadLocalFile(context, local, mediaFile, listener);
+            return;
+        }
+
+        // Chưa có trên máy -> tải từ drone về thư mục riêng của app
+        File uploadDir = new File(context.getExternalFilesDir(null), "DJI_Upload");
+        if (!uploadDir.exists()) uploadDir.mkdirs();
+        String fileName = mediaFile.getFileName();
+        main.post(() -> listener.onStatus("Đang tải từ drone: " + fileName));
+
+        suspendScheduler(() -> mediaFile.fetchFileData(uploadDir, baseName(fileName), new DownloadListener<String>() {
+            private int lastPct = -1;
+
+            @Override public void onStart() {}
+            @Override public void onRateUpdate(long total, long current, long persize) {}
+
+            @Override
+            public void onProgress(long total, long current) {
+                long t = mediaFile.getFileSize() > 0 ? mediaFile.getFileSize() : total;
+                int pct = t > 0 ? (int) (current * 100 / t) : 0;
+                if (pct != lastPct) {
+                    lastPct = pct;
+                    main.post(() -> listener.onStatus("Tải từ drone " + fileName + ": " + pct + "%"));
+                }
+            }
+
+            @Override
+            public void onSuccess(String filePath) {
+                resumeScheduler();
+                File realFile = resolveDownloadedFile(uploadDir, fileName, filePath);
+                if (realFile == null) {
+                    main.post(() -> listener.onDone(false, "Tải xong nhưng không tìm thấy file " + fileName));
+                    return;
+                }
+                uploadLocalFile(context, realFile, mediaFile, listener);
+            }
+
+            @Override
+            public void onFailure(DJIError error) {
+                resumeScheduler();
+                main.post(() -> listener.onDone(false, "Lỗi tải từ drone: "
+                        + (error != null ? error.getDescription() : "Thất bại")));
+            }
+
+            @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
+        }));
+    }
+
+    private static void uploadLocalFile(Context context, File file, MediaFile mediaFile, FirebaseUploadListener listener) {
+        String meta = buildMetaInfo(file, mediaFile);
+        FirebaseHelper.uploadFileToFirebase(context, file, mediaFile, meta, new FirebaseHelper.UploadCallback() {
+            @Override
+            public void onProgress(int percent, long done, long total) {
+                listener.onStatus(String.format(Locale.US, "Đẩy lên Cloud %s: %d%% (%.1f/%.1f MB)",
+                        file.getName(), percent, done / 1048576.0, total / 1048576.0));
+            }
+
+            @Override
+            public void onSuccess(String downloadUrl) {
+                listener.onDone(true, "Đã đẩy " + file.getName() + " lên Cloud!");
+            }
+
+            @Override
+            public void onFailure(String message) {
+                listener.onDone(false, "Lỗi Cloud (" + file.getName() + "): " + message);
+            }
+        });
     }
 }

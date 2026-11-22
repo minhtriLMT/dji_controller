@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Trình xem ẢNH / VIDEO toàn màn hình (dùng chung cho thẻ nhớ drone và ảnh trên điện thoại) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B0D10"
+    android:orientation="vertical">
+
+    <!-- ===== THANH TRÊN: đóng + tên file + loại ===== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="16dp">
+
+        <ImageButton
+            android:id="@+id/viewerClose"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/bg_wp_close"
+            android:contentDescription="Đóng"
+            android:padding="9dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_map_back" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/viewerTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="middle"
+                android:maxLines="1"
+                android:text="DJI_0001.JPG"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/viewerSubtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textColor="#9AA0A6"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/viewerTypeChip"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_st_badge_photo"
+            android:paddingStart="10dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="4dp"
+            android:text="ẢNH"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- ===== KHUNG HIỂN THỊ ===== -->
+    <FrameLayout
+        android:id="@+id/viewerStage"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_weight="1"
+        android:background="@drawable/bg_st_thumb"
+        android:clipToOutline="true">
+
+        <ImageView
+            android:id="@+id/viewerImage"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:contentDescription="Ảnh"
+            android:scaleType="fitCenter" />
+
+        <VideoView
+            android:id="@+id/viewerVideo"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_gravity="center"
+            android:visibility="gone" />
+
+        <!-- Lớp chờ tải (đè lên ảnh/video) -->
+        <LinearLayout
+            android:id="@+id/viewerLoading"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#CC0B0D10"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <ProgressBar
+                android:id="@+id/viewerSpinner"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:indeterminateTint="#69F0AE" />
+
+            <TextView
+                android:id="@+id/viewerLoadingTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:gravity="center"
+                android:text="Đang tải..."
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <ProgressBar
+                android:id="@+id/viewerProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="300dp"
+                android:layout_height="6dp"
+                android:layout_marginTop="12dp"
+                android:max="100"
+                android:progressBackgroundTint="#33FFFFFF"
+                android:progressTint="#69F0AE"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/viewerProgressText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:fontFeatureSettings="tnum"
+                android:gravity="center"
+                android:textColor="#9AA0A6"
+                android:textSize="12sp" />
+
+            <androidx.appcompat.widget.AppCompatButton
+                android:id="@+id/viewerRetry"
+                style="@style/WpButton"
+                android:layout_width="wrap_content"
+                android:layout_height="38dp"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_wp_btn_outline"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:text="Thử nạp lại"
+                android:textColor="@color/txt_wp_outline"
+                android:visibility="gone" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- ===== THANH DƯỚI: ghi chú + nút ===== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="10dp">
+
+        <TextView
+            android:id="@+id/viewerHint"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:maxLines="2"
+            android:textColor="#9AA0A6"
+            android:textSize="11sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/viewerBtnExternal"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_wp_btn_ghost"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="Trình phát ngoài"
+            android:textColor="@color/txt_wp_ghost"
+            android:visibility="gone" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/viewerBtnDownload"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_st_btn_download"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:text="Tải về máy"
+            android:textColor="#0F2A1C" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/viewerBtnCloud"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_st_btn_cloud"
+            android:minWidth="120dp"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
+            android:text="Lên Cloud"
+            android:textColor="#2B1A00" />
+    </LinearLayout>
+</LinearLayout>

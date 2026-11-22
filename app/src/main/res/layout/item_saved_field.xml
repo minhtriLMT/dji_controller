@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1 mảnh ruộng trong danh sách đã lưu -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="8dp"
+    android:background="@drawable/bg_cf_card"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="12dp"
+    android:paddingTop="10dp"
+    android:paddingEnd="10dp"
+    android:paddingBottom="10dp">
+
+    <View
+        android:id="@+id/fieldStatusDot"
+        android:layout_width="10dp"
+        android:layout_height="10dp"
+        android:background="@drawable/bg_wp_dot" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvFieldName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxWidth="260dp"
+                android:maxLines="1"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvFieldCurrent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/bg_cf_chip"
+                android:paddingStart="8dp"
+                android:paddingTop="1dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="1dp"
+                android:text="ĐANG CHỌN"
+                android:textColor="#69F0AE"
+                android:textSize="8sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvFieldInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:maxLines="1"
+            android:textColor="#9AA0A6"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnFieldDelete"
+        style="@style/WpButton"
+        android:layout_width="wrap_content"
+        android:layout_height="34dp"
+        android:background="@drawable/bg_wp_btn_ghost"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:text="Xóa"
+        android:textColor="#FF8A80"
+        android:textSize="11sp" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnFieldCloud"
+        style="@style/WpButton"
+        android:layout_width="wrap_content"
+        android:layout_height="34dp"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/bg_wp_btn_outline"
+        android:minWidth="76dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:text="Cloud"
+        android:textColor="@color/txt_wp_outline"
+        android:textSize="11sp" />
+
+    <androidx.appcompat.widget.AppCompatButton
+        android:id="@+id/btnFieldSelect"
+        style="@style/WpButton"
+        android:layout_width="wrap_content"
+        android:layout_height="34dp"
+        android:layout_marginStart="8dp"
+        android:background="@drawable/bg_cf_btn_fly"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:text="Chọn"
+        android:textColor="@color/txt_cf_btn_fly"
+        android:textSize="11sp" />
+</LinearLayout>

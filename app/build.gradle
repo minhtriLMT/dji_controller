@@ -2,6 +2,12 @@ plugins {
     alias(libs.plugins.android.application)
 }
 
+// Chỉ bật Google Services khi đã có app/google-services.json (tải từ Firebase Console),
+// để project vẫn build được khi chưa cấu hình Firebase.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 android {
     namespace 'com.tri.djicontrol'
     compileSdk 36
@@ -70,6 +76,11 @@ dependencies {
     implementation libs.constraintlayout
     implementation 'org.maplibre.gl:android-sdk:11.0.0'
     implementation 'com.squareup.okhttp3:okhttp:4.10.0'
+
+    // Upload ảnh/video lên Cloudinary dùng OkHttp ở trên (không cần SDK).
+    // Firebase Storage cần gói Blaze; nếu sau này bật thì thêm lại:
+    // implementation platform(libs.firebase.bom)
+    // implementation libs.firebase.storage
 
     implementation ('com.dji:dji-sdk:4.17')
     compileOnly ('com.dji:dji-sdk-provided:4.17')

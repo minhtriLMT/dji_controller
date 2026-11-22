@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nút tròn Lưu trữ / Tạm dừng quay cạnh nút chụp -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <shape android:shape="oval">
+            <solid android:color="#4D69F0AE" />
+            <stroke android:width="1.5dp" android:color="#69F0AE" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#80191C21" />
+            <stroke android:width="1.5dp" android:color="#CCFFFFFF" />
+        </shape>
+    </item>
+</selector>

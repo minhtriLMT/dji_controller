@@ -31,6 +31,8 @@ import android.os.Looper;
 import android.os.Environment;
 import android.media.MediaScannerConnection;
 import android.view.View;
+import android.view.LayoutInflater;
+import android.widget.CheckBox;
 import android.view.TextureView;
 import android.view.MotionEvent;
 import android.widget.Button;
@@ -76,6 +78,8 @@ import static org.maplibre.android.style.layers.PropertyFactory.visibility;
 import org.maplibre.android.location.engine.LocationEngineRequest;
 import com.tri.djicontrol.connection.DJIConnectionManager;
 import com.tri.djicontrol.flight.FlightMissionManager;
+import com.tri.djicontrol.flight.GridPlanner;
+import android.widget.EditText;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -119,10 +123,12 @@ import okhttp3.Response;
 import okio.BufferedSink;
 
 public class MainActivity extends AppCompatActivity implements TextureView.SurfaceTextureListener {
-    private TextView tvStatus, tvGpsAndSdStatus, tvTelemetry, tvPhotoCount, tvSpeedStats;
-    private Button btnCaptureManual, btnViewPhotos, btnLockRoute , btnVideoPhoto;
+    private TextView tvStatus, tvGpsAndSdStatus, tvTelemetry, tvPhotoCount, tvCaptureLabel, tvSpeedStats;
+    private Button btnCaptureManual, btnLockRoute , btnVideoPhoto;
+    private android.widget.ImageButton btnViewPhotos;
     private FrameLayout cameraModePicker;
     private TextView tvCameraVideo;
+    private View cameraModeThumb;
     private TextView tvCameraPhoto,tvVideoTimer;
     private float cameraSwipeStartY;
 
@@ -300,6 +306,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         );
 
                         style.addLayer(flightPathLayer);
+
+                        // RUỘNG + PHẦN ĐÃ BAY + ĐIỂM BẮT ĐẦU (bay quét WP)
+                        setupWpMapLayers(style);
                     }
             );
 
@@ -323,7 +332,20 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         tvStatus = findViewById(R.id.tvStatus);
         tvGpsAndSdStatus = findViewById(R.id.tvGpsAndSdStatus);
         tvTelemetry = findViewById(R.id.tvTelemetry);
+        statusDot = findViewById(R.id.statusDot);
+        tvChipGps = findViewById(R.id.tvChipGps);
+        tvChipBattery = findViewById(R.id.tvChipBattery);
+        tvChipRc = findViewById(R.id.tvChipRc);
+        tvChipSd = findViewById(R.id.tvChipSd);
+        tvChipHome = findViewById(R.id.tvChipHome);
+        tvTeleAlt = findViewById(R.id.tvTeleAlt);
+        tvTeleHSpeed = findViewById(R.id.tvTeleHSpeed);
+        tvTeleVSpeed = findViewById(R.id.tvTeleVSpeed);
+        tvTeleDist = findViewById(R.id.tvTeleDist);
+        tvTeleDistLabel = findViewById(R.id.tvTeleDistLabel);
+        tvTeleNet = findViewById(R.id.tvTeleNet);
         tvPhotoCount = findViewById(R.id.tvPhotoCount);
+        tvCaptureLabel = findViewById(R.id.tvCaptureLabel);
         tvVideoTimer = findViewById(R.id.tvVideoTimer);
         tvFieldArea = findViewById(R.id.tvFieldArea);
 
@@ -345,6 +367,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         cameraModePicker = findViewById(R.id.cameraModePicker);
         tvCameraVideo = findViewById(R.id.tvCameraVideo);
         tvCameraPhoto = findViewById(R.id.tvCameraPhoto);
+        cameraModeThumb = findViewById(R.id.cameraModeThumb);
         setupCameraModeSwipe();
 
         if (videoSurface != null) {
@@ -356,13 +379,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 if (!isVideoPaused) {
                     isVideoPaused = true;
                     videoPauseStartTime = System.currentTimeMillis();
-                    btnViewPhotos.setText("▶");
+                    btnViewPhotos.setImageResource(R.drawable.ic_storage_play);
                     btnViewPhotos.setContentDescription("Tiếp tục quay");
+                    setRecTimerDot(0xFFFFB74D, 255); // cam = đang tạm dừng
                     Toast.makeText(MainActivity.this, "Đã tạm dừng quay", Toast.LENGTH_SHORT).show();
                 } else {
                     isVideoPaused = false;
                     videoPausedTime += System.currentTimeMillis() - videoPauseStartTime;
-                    btnViewPhotos.setText("Ⅱ");
+                    btnViewPhotos.setImageResource(R.drawable.ic_storage_pause);
                     btnViewPhotos.setContentDescription("Tạm dừng quay");
                     Toast.makeText(MainActivity.this, "Tiếp tục quay", Toast.LENGTH_SHORT).show();
                     videoTimerHandler.post(videoTimerRunnable);
@@ -383,17 +407,19 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             if (camera == null) return;
 
             if (isRecordingVideo) {
-                // Nếu đang quay video, chụp khung hình trực tiếp từ video stream
-                if (videoSurface != null && videoSurface.isAvailable()) {
-                    Bitmap currentFrame = videoSurface.getBitmap();
-                    if (currentFrame != null) {
-                        saveLiveFramePhoto(currentFrame);
+                // Đang quay: chụp bằng phần cứng camera (không đổi mode, không dừng quay)
+                // để ảnh được ghi thẳng vào thẻ nhớ drone -> hiện trong Kho lưu trữ.
+                camera.startShootPhoto(djiError -> {
+                    if (djiError == null) {
+                        photoCount++;
+                        runOnUiThread(() -> {
+                            Toast.makeText(MainActivity.this, "Đã chụp 1 tấm vào thẻ nhớ drone!", Toast.LENGTH_SHORT).show();
+                        });
                     } else {
-                        Toast.makeText(MainActivity.this, "Không lấy được khung hình video!", Toast.LENGTH_SHORT).show();
+                        // Camera không hỗ trợ chụp khi đang quay -> lấy khung hình từ luồng video
+                        runOnUiThread(() -> captureFrameFromLiveView(djiError.getDescription()));
                     }
-                } else {
-                    Toast.makeText(MainActivity.this, "Giao diện video chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
-                }
+                });
             } else {
                 // Nếu chưa quay video nhưng đang ở chế độ Video UI
                 // Bước 1: Thử chụp trực tiếp bằng phần cứng trước
@@ -401,7 +427,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     if (djiError == null) {
                         photoCount++;
                         runOnUiThread(() -> {
-                            tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
                             Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
                         });
                     } else {
@@ -419,7 +444,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                         if (shootErr == null) {
                                             photoCount++;
                                             runOnUiThread(() -> {
-                                                tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
                                                 Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
                                             });
                                         } else {
@@ -440,7 +464,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         DJIConnectionManager.getInstance().setConnectionListener(status -> {
             runOnUiThread(() -> {
-                tvStatus.setText("Trạng thái: " + status);
+                tvStatus.setText(status);
+                setConnectionDot(status.contains("Đã kết nối") ? Boolean.TRUE
+                        : status.contains("mất") || status.contains("Lỗi") ? Boolean.FALSE : null);
                 if (status.contains("Đã kết nối")) {
                     if (miniMapLibreMap != null && miniMapLibreMap.getStyle() != null) {
                         SymbolLayer layer =
@@ -452,7 +478,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             );
                         }
                     }
-                    missionManager = new FlightMissionManager();
+                    missionManager = new FlightMissionManager(MainActivity.this);
+                    com.tri.djicontrol.firebase.UploadMeta.refreshDroneInfo();
                     if (DJISDKManager.getInstance().getProduct() != null) {
                         Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
 
@@ -466,7 +493,22 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             battery.setStateCallback(batteryState -> {
                                 if (batteryState != null) {
                                     batteryPercent = batteryState.getChargeRemainingInPercent();
+                                    // Nhiệm vụ bay quét theo dõi pin để tự về nhà khi pin yếu
+                                    if (missionManager != null) missionManager.onBatteryUpdate(batteryPercent);
+                                    runOnUiThread(MainActivity.this::maybePromptResume);
                                 }
+                            });
+                        }
+
+                        // Góc gimbal thật -> thanh chỉnh góc camera chạy theo (chỉ cập nhật khi đổi ≥ 1°)
+                        dji.sdk.gimbal.Gimbal gimbalComp = aircraft.getGimbal();
+                        if (gimbalComp != null) {
+                            gimbalComp.setStateCallback(gs -> {
+                                if (gs == null || gs.getAttitudeInDegrees() == null) return;
+                                float pitch = gs.getAttitudeInDegrees().getPitch();
+                                if (Math.abs(pitch - lastGimbalPitch) < 1f) return;
+                                lastGimbalPitch = pitch;
+                                runOnUiThread(() -> syncGimbalSlider(pitch));
                             });
                         }
 
@@ -629,14 +671,36 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                         }
                                         String homeStatus = isHomePointSet ? "[HOME: OK]" : "[HOME: ĐANG TÌM]";
                                         tvGpsAndSdStatus.setText(String.format("GPS: %d | Pin: %d%% | RC: %d%% | %s %s", satellites, batteryPercent, rcSignalPercent, sdStatusStr, homeStatus));
+                                        updateStatusChips(satellites);
+
+                                        // Khoảng cách tới Home (nếu đã có Home Point), không thì tới đích cũ
+                                        double homeDist = -1;
+                                        try {
+                                            LocationCoordinate2D home = state.getHomeLocation();
+                                            if (isHomePointSet && home != null && !Double.isNaN(home.getLatitude())
+                                                    && state.getAircraftLocation() != null
+                                                    && !Double.isNaN(state.getAircraftLocation().getLatitude())) {
+                                                homeDist = calculateHaversineDistance(
+                                                        state.getAircraftLocation().getLatitude(),
+                                                        state.getAircraftLocation().getLongitude(),
+                                                        home.getLatitude(), home.getLongitude());
+                                            }
+                                        } catch (Exception ignored) {}
+                                        float vSpeed = -state.getVelocityZ(); // DJI: Z dương = đi xuống
 
                                         String speedInfo = String.format("%s | %s", downloadSpeedText, uploadSpeedText);
+                                        String net;
                                         if (tvSpeedStats != null) {
-                                            tvSpeedStats.setText(speedInfo);
+                                            String fb = firebaseBatchStatus;
+                                            tvSpeedStats.setText(fb != null ? fb + "\n" + speedInfo : speedInfo);
                                             tvTelemetry.setText(String.format("Cao: %.1fm | Tốc độ: %.1fm/s\nCách đích: %.1fm", currentAlt, speed, distance));
+                                            net = null; // đang mở Lưu trữ -> tốc độ mạng hiện ở đó
                                         } else {
                                             tvTelemetry.setText(String.format("Cao: %.1fm | Tốc độ: %.1fm/s\nCách đích: %.1fm | %s", currentAlt, speed, distance, speedInfo));
+                                            net = speedInfo.replace(" | ", "\n");
                                         }
+                                        updateTelemetryCard(currentAlt, speed, vSpeed,
+                                                homeDist >= 0 ? homeDist : distance, homeDist >= 0, net);
                                     });
                                 }
                             });
@@ -662,23 +726,54 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     }
 
                     lastDroneLocation = null;
+                    runOnUiThread(() -> setConnectionDot(false));
                 }
             });
         });
 
         DJIConnectionManager.getInstance().startConnection(this.getApplicationContext());
 
+        // Thanh góc camera: progress 0..110 <-> góc -90°..+20° (giới hạn gimbal Mini 2)
+        tvGimbalAngle = findViewById(R.id.tvGimbalAngle);
         seekBarGimbal.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (missionManager != null && fromUser) {
-                    float angle = progress - 90f;
-                    missionManager.setGimbalAngle(angle);
-                }
+                float angle = progress - GIMBAL_OFFSET;
+                showGimbalAngle(angle);
+                if (missionManager != null && fromUser) missionManager.setGimbalAngle(angle);
             }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStartTrackingTouch(SeekBar seekBar) { gimbalDragging = true; }
+            @Override public void onStopTrackingTouch(SeekBar seekBar) { gimbalDragging = false; }
         });
+        // Chạm số độ: chuyển nhanh nhìn thẳng (0°) <-> nhìn thẳng xuống (-90°)
+        if (tvGimbalAngle != null) {
+            tvGimbalAngle.setOnClickListener(v -> {
+                float target = seekBarGimbal.getProgress() - GIMBAL_OFFSET > -45 ? -90f : 0f;
+                seekBarGimbal.setProgress(Math.round(target + GIMBAL_OFFSET));
+                if (missionManager != null) missionManager.setGimbalAngle(target);
+            });
+        }
+        showGimbalAngle(seekBarGimbal.getProgress() - GIMBAL_OFFSET);
+    }
+
+    private static final int GIMBAL_OFFSET = 90;
+    private TextView tvGimbalAngle;
+    private volatile boolean gimbalDragging = false;
+    private volatile float lastGimbalPitch = Float.NaN;
+
+    private void showGimbalAngle(float angle) {
+        if (tvGimbalAngle == null) return;
+        int a = Math.round(angle);
+        tvGimbalAngle.setText(a + "°");
+        // Xanh khi camera nhìn thẳng xuống (góc chụp bản đồ ruộng)
+        tvGimbalAngle.setTextColor(a <= -85 ? 0xFF69F0AE : 0xFFFFFFFF);
+    }
+
+    /** Gọi từ callback trạng thái gimbal: thanh chạy theo góc thật (vd khi bay WP tự hạ camera). */
+    private void syncGimbalSlider(float pitch) {
+        if (seekBarGimbal == null || gimbalDragging) return;
+        int p = Math.max(0, Math.min(seekBarGimbal.getMax(), Math.round(pitch + GIMBAL_OFFSET)));
+        if (Math.abs(p - seekBarGimbal.getProgress()) >= 1) seekBarGimbal.setProgress(p);
     }
 
     private void updateNetworkSpeedUI() {
@@ -751,6 +846,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 Toast.makeText(MainActivity.this, "ĐÃ TẢI XONG TOÀN BỘ " + photoList.size() + " ẢNH VỀ ALBUM!", Toast.LENGTH_LONG).show();
                 camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, null);
             });
+            StorageAdapter.resumeScheduler();
             return;
         }
 
@@ -760,7 +856,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang tải ảnh (" + (index + 1) + "/" + photoList.size() + "): " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
 
-        targetMedia.fetchFileData(destDir, targetMedia.getFileName(), new DownloadListener<String>() {
+        StorageAdapter.suspendScheduler(() -> targetMedia.fetchFileData(destDir, StorageAdapter.baseName(targetMedia.getFileName()), new DownloadListener<String>() {
             @Override
             public void onStart() {}
             @Override
@@ -770,7 +866,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
             @Override
             public void onSuccess(String filePath) {
-                MediaScannerConnection.scanFile(MainActivity.this, new String[]{filePath}, new String[]{"image/jpeg", "image/tiff"}, null);
+                File realFile = StorageAdapter.resolveDownloadedFile(destDir, targetMedia.getFileName(), filePath);
+                if (realFile != null) {
+                    MediaScannerConnection.scanFile(MainActivity.this, new String[]{realFile.getAbsolutePath()}, null, null);
+                }
                 // Tải tiếp tấm tiếp theo
                 downloadPhotoListRecursive(camera, photoList, index + 1);
             }
@@ -783,6 +882,43 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
             @Override
             public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
+        }));
+    }
+
+    // Đẩy lần lượt từng file đã chọn lên Firebase (tự tải từ drone nếu chưa có trên máy).
+    // Tiến trình hiện ở dòng tvSpeedStats của dialog Lưu trữ.
+    private volatile String firebaseBatchStatus = null;
+
+    private void uploadBatchToFirebaseRecursive(List<MediaFile> fileList, int index, int successCount) {
+        if (index >= fileList.size()) {
+            String done = "CLOUD: XONG " + successCount + "/" + fileList.size() + " FILE";
+            firebaseBatchStatus = done;
+            runOnUiThread(() -> {
+                if (tvSpeedStats != null) tvSpeedStats.setText(done);
+                Toast.makeText(MainActivity.this, done, Toast.LENGTH_LONG).show();
+            });
+            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (done.equals(firebaseBatchStatus)) firebaseBatchStatus = null;
+            }, 6000);
+            return;
+        }
+
+        MediaFile mediaFile = fileList.get(index);
+        String prefix = "[" + (index + 1) + "/" + fileList.size() + "] ";
+        StorageAdapter.uploadMediaToFirebase(MainActivity.this, mediaFile, new StorageAdapter.FirebaseUploadListener() {
+            @Override
+            public void onStatus(String status) {
+                firebaseBatchStatus = prefix + status;
+                if (tvSpeedStats != null) tvSpeedStats.setText(firebaseBatchStatus);
+            }
+
+            @Override
+            public void onDone(boolean success, String message) {
+                if (!success) {
+                    Toast.makeText(MainActivity.this, prefix + message, Toast.LENGTH_SHORT).show();
+                }
+                uploadBatchToFirebaseRecursive(fileList, index + 1, successCount + (success ? 1 : 0));
+            }
         });
     }
 
@@ -797,6 +933,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         Toast.LENGTH_LONG
                 ).show();
             });
+            StorageAdapter.resumeScheduler();
             return;
         }
 
@@ -830,17 +967,18 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 Toast.LENGTH_SHORT
         ).show());
 
-        mediaFile.fetchFileData(finalDestDir, fileName, new DownloadListener<String>() {
+        StorageAdapter.suspendScheduler(() -> mediaFile.fetchFileData(finalDestDir, StorageAdapter.baseName(fileName), new DownloadListener<String>() {
             @Override public void onStart() {}
             @Override public void onRateUpdate(long total, long current, long persize) {}
             @Override public void onProgress(long total, long current) {}
 
             @Override
             public void onSuccess(String filePath) {
-                if (filePath != null) {
+                File realFile = StorageAdapter.resolveDownloadedFile(finalDestDir, fileName, filePath);
+                if (realFile != null) {
                     MediaScannerConnection.scanFile(
                             MainActivity.this,
-                            new String[]{filePath},
+                            new String[]{realFile.getAbsolutePath()},
                             new String[]{isVideo ? "video/*" : "image/*"},
                             null
                     );
@@ -859,7 +997,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             }
 
             @Override public void onRealtimeDataUpdate(byte[] bytes, long l, boolean b) {}
-        });
+        }));
     }
 
     // ==========================================================
@@ -1013,39 +1151,23 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             unselected = tvCameraPhoto;
         }
 
-        selected.setTextColor(Color.YELLOW);
-        selected.setTextSize(20);
-        selected.setTypeface(null, Typeface.BOLD);
-        selected.setAlpha(1.0f);
+        // Chữ + biểu tượng: tối trên khối vàng (đang chọn), trắng mờ khi không chọn
+        android.content.res.ColorStateList on = android.content.res.ColorStateList.valueOf(0xFF1A1A1A);
+        android.content.res.ColorStateList off = android.content.res.ColorStateList.valueOf(0xD9FFFFFF);
+        selected.setTextColor(on);
+        selected.setCompoundDrawableTintList(on);
+        unselected.setTextColor(off);
+        unselected.setCompoundDrawableTintList(off);
 
-        unselected.setTextColor(Color.WHITE);
-        unselected.setTextSize(16);
-        unselected.setTypeface(null, Typeface.NORMAL);
-        unselected.setAlpha(0.6f);
-
-        if (animate) {
-            if (photo) {
-                tvCameraPhoto.animate().translationY(0).scaleX(1.0f).scaleY(1.0f).setDuration(180).start();
-                tvCameraVideo.animate().translationY(-42).scaleX(0.9f).scaleY(0.9f).setDuration(180).start();
+        // Khối vàng trượt tới chế độ đang chọn (VIDEO ở trên, ẢNH ở dưới)
+        if (cameraModeThumb != null) {
+            float target = photo ? 52 * getResources().getDisplayMetrics().density : 0f;
+            cameraModeThumb.animate().cancel();
+            if (animate) {
+                cameraModeThumb.animate().translationY(target).setDuration(200)
+                        .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
             } else {
-                tvCameraVideo.animate().translationY(0).scaleX(1.0f).scaleY(1.0f).setDuration(180).start();
-                tvCameraPhoto.animate().translationY(42).scaleX(0.9f).scaleY(0.9f).setDuration(180).start();
-            }
-        } else {
-            if (photo) {
-                tvCameraPhoto.setTranslationY(0);
-                tvCameraPhoto.setScaleX(1.0f);
-                tvCameraPhoto.setScaleY(1.0f);
-                tvCameraVideo.setTranslationY(-42);
-                tvCameraVideo.setScaleX(0.9f);
-                tvCameraVideo.setScaleY(0.9f);
-            } else {
-                tvCameraVideo.setTranslationY(0);
-                tvCameraVideo.setScaleX(1.0f);
-                tvCameraVideo.setScaleY(1.0f);
-                tvCameraPhoto.setTranslationY(42);
-                tvCameraPhoto.setScaleX(0.9f);
-                tvCameraPhoto.setScaleY(0.9f);
+                cameraModeThumb.setTranslationY(target);
             }
         }
     }
@@ -1126,7 +1248,6 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     photoCount++;
                     runOnUiThread(() -> {
                         Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
-                        tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
                     });
                 } else {
                     runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chụp: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
@@ -1142,7 +1263,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         isRecordingVideo = true;
                         isVideoPaused = false;
                         startVideoTimer();
-                        btnViewPhotos.setText("Ⅱ");
+                        btnViewPhotos.setImageResource(R.drawable.ic_storage_pause);
                         btnViewPhotos.setContentDescription("Tạm dừng quay");
                         btnCaptureManual.setSelected(true);
                         btnCaptureManual.setContentDescription("Dừng quay");
@@ -1161,7 +1282,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         stopVideoTimer();
                         btnCaptureManual.setSelected(false);
                         btnCaptureManual.setContentDescription("Quay video");
-                        btnViewPhotos.setText("□");
+                        btnViewPhotos.setImageResource(R.drawable.ic_storage_gallery);
                         btnViewPhotos.setContentDescription("Mở kho lưu trữ");
                         Toast.makeText(MainActivity.this, "Đã lưu Video vào thẻ nhớ!", Toast.LENGTH_SHORT).show();
                     } else {
@@ -1172,12 +1293,97 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
     }
 
+    // =========================================================
+    // THANH TRẠNG THÁI TRÊN + THẺ THÔNG SỐ BAY DƯỚI
+    // =========================================================
+    private static final int C_GOOD = 0xFF69F0AE, C_WARN = 0xFFFFD54F, C_BAD = 0xFFFF5252, C_IDLE = 0xFF9AA0A6;
+    private View statusDot;
+    private TextView tvChipGps, tvChipBattery, tvChipRc, tvChipSd, tvChipHome;
+    private TextView tvTeleAlt, tvTeleHSpeed, tvTeleVSpeed, tvTeleDist, tvTeleDistLabel, tvTeleNet;
+
+    /** true = xanh (đã kết nối), false = đỏ (mất kết nối), null = vàng (đang kết nối). */
+    private void setConnectionDot(Boolean connected) {
+        if (statusDot == null) return;
+        int c = connected == null ? C_WARN : connected ? C_GOOD : C_BAD;
+        statusDot.setBackgroundTintList(android.content.res.ColorStateList.valueOf(c));
+        if (Boolean.FALSE.equals(connected)) {
+            setChip(tvChipGps, "GPS --", C_IDLE);
+            setChip(tvChipBattery, "PIN --%", C_IDLE);
+            setChip(tvChipRc, "RC --%", C_IDLE);
+            setChip(tvChipSd, "THẺ --", C_IDLE);
+            setChip(tvChipHome, "HOME", C_IDLE);
+        }
+    }
+
+    private static void setChip(TextView chip, String text, int color) {
+        if (chip == null) return;
+        chip.setText(text);
+        chip.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(color));
+    }
+
+    /** Mỗi ô một màu theo ngưỡng: xanh = tốt, vàng = cần chú ý, đỏ = nguy hiểm. */
+    private void updateStatusChips(int satellites) {
+        setConnectionDot(true);
+        setChip(tvChipGps, "GPS " + satellites, satellites >= 10 ? C_GOOD : satellites >= 6 ? C_WARN : C_BAD);
+        int bat = batteryPercent;
+        setChip(tvChipBattery, bat > 0 ? "PIN " + bat + "%" : "PIN --%",
+                bat <= 0 ? C_IDLE : bat <= Math.max(25, wpLowBattery) ? C_BAD : bat <= 50 ? C_WARN : C_GOOD);
+        int rc = rcSignalPercent;
+        setChip(tvChipRc, rc > 0 ? "RC " + rc + "%" : "RC --%",
+                rc <= 0 ? C_IDLE : rc >= 60 ? C_GOOD : rc >= 30 ? C_WARN : C_BAD);
+        String sd = sdStatusStr != null ? sdStatusStr.replace("Thẻ: ", "") : "--";
+        boolean sdOk = sd.equals("OK") || sd.equals("Sẵn sàng");
+        setChip(tvChipSd, "THẺ " + (sd.equals("Sẵn sàng") ? "OK" : sd.toUpperCase(Locale.ROOT)), sdOk ? C_GOOD : C_BAD);
+        setChip(tvChipHome, isHomePointSet ? "HOME" : "HOME ...", isHomePointSet ? C_GOOD : C_WARN);
+    }
+
+    private void updateTelemetryCard(float alt, float hSpeed, float vSpeed, double dist, boolean toHome, String net) {
+        if (tvTeleAlt == null) return;
+        tvTeleAlt.setText(teleValue(String.format(Locale.US, "%.1f", alt), "m"));
+        tvTeleAlt.setTextColor(alt > 120 ? C_WARN : 0xFFFFFFFF); // > 120 m: vượt giới hạn độ cao thường gặp
+        tvTeleHSpeed.setText(teleValue(String.format(Locale.US, "%.1f", hSpeed), "m/s"));
+        String arrow = vSpeed > 0.2f ? "↑ " : vSpeed < -0.2f ? "↓ " : "";
+        tvTeleVSpeed.setText(teleValue(arrow + String.format(Locale.US, "%.1f", Math.abs(vSpeed)), "m/s"));
+        tvTeleDist.setText(dist >= 1000
+                ? teleValue(String.format(Locale.US, "%.2f", dist / 1000.0), "km")
+                : teleValue(String.format(Locale.US, "%.0f", dist), "m"));
+        tvTeleDistLabel.setText(toHome ? "CÁCH HOME" : "CÁCH ĐÍCH");
+        // Chỉ hiện tốc độ mạng khi đang tải/đẩy (cả DL và UL đều 0 thì ẩn cho gọn)
+        boolean showNet = net != null && !net.trim().isEmpty()
+                && !(net.contains("DL: 0 KB/s") && net.contains("UL: 0 KB/s"));
+        tvTeleNet.setVisibility(showNet ? View.VISIBLE : View.GONE);
+        if (showNet) tvTeleNet.setText(net);
+    }
+
+    /** "12.3" to + " m" nhỏ, xám. */
+    private static CharSequence teleValue(String value, String unit) {
+        android.text.SpannableString s = new android.text.SpannableString(value + " " + unit);
+        int start = value.length() + 1;
+        s.setSpan(new android.text.style.RelativeSizeSpan(0.7f), start, s.length(), 0);
+        s.setSpan(new android.text.style.ForegroundColorSpan(0xFF9AA0A6), start, s.length(), 0);
+        return s;
+    }
+
+    /** Đổi màu / độ mờ chấm tròn bên trái đồng hồ quay (đỏ = đang quay, cam = tạm dừng). */
+    private void setRecTimerDot(int color, int alpha) {
+        if (tvVideoTimer == null) return;
+        android.graphics.drawable.Drawable[] ds = tvVideoTimer.getCompoundDrawablesRelative();
+        android.graphics.drawable.Drawable dot = ds[0];
+        if (dot == null) return;
+        dot = dot.mutate();
+        dot.setTint(color);
+        dot.setAlpha(alpha);
+        tvVideoTimer.setCompoundDrawablesRelative(dot, ds[1], ds[2], ds[3]);
+    }
+
     private void startVideoTimer() {
         videoStartTime = System.currentTimeMillis();
         videoPausedTime = 0;
         videoPauseStartTime = 0;
         tvVideoTimer.setText("00:00");
         tvVideoTimer.setVisibility(View.VISIBLE);
+        setRecTimerDot(0xFFFF3B30, 255);
+        startLiveRecording(); // ghi bản xem nhanh song song với file gốc trên thẻ nhớ
         videoTimerRunnable = new Runnable() {
             @Override
             public void run() {
@@ -1186,8 +1392,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     long totalSeconds = elapsed / 1000;
                     long minutes = totalSeconds / 60;
                     long seconds = totalSeconds % 60;
-                    String time = String.format(Locale.getDefault(), "%02d:%02d", minutes, seconds);
+                    String time = totalSeconds >= 3600
+                            ? String.format(Locale.US, "%d:%02d:%02d", totalSeconds / 3600, minutes % 60, seconds)
+                            : String.format(Locale.US, "%02d:%02d", minutes, seconds);
                     tvVideoTimer.setText(time);
+                    // Chấm đỏ nhấp nháy mỗi giây khi đang quay
+                    setRecTimerDot(0xFFFF3B30, totalSeconds % 2 == 0 ? 255 : 70);
                     videoTimerHandler.postDelayed(this, 1000);
                 }
             }
@@ -1204,6 +1414,53 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         videoStartTime = 0;
         videoPausedTime = 0;
         videoPauseStartTime = 0;
+        stopLiveRecording();
+    }
+
+    // =========================================================
+    // BẢN XEM NHANH: ghi luồng camera trực tiếp thành MP4 trên điện thoại
+    // trong lúc drone quay -> xem ngay ở Lưu trữ > Trên điện thoại, không chờ tải file gốc.
+    // =========================================================
+    private volatile com.tri.djicontrol.media.LiveStreamRecorder liveRecorder;
+
+    public static File liveRecordDir(android.content.Context ctx) {
+        return new File(ctx.getExternalFilesDir(null), "DJI_LiveRec");
+    }
+
+    private void startLiveRecording() {
+        if (liveRecorder != null) return;
+        String name = "LIVE_REC_" + new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
+                .format(new java.util.Date()) + ".mp4";
+        File out = new File(liveRecordDir(this), name);
+        double lat = Double.NaN, lon = Double.NaN;
+        try {
+            FlightController fc = ((Aircraft) DJISDKManager.getInstance().getProduct()).getFlightController();
+            if (fc != null && fc.getState() != null && fc.getState().getAircraftLocation() != null) {
+                lat = fc.getState().getAircraftLocation().getLatitude();
+                lon = fc.getState().getAircraftLocation().getLongitude();
+            }
+        } catch (Exception ignored) {}
+        int w = videoSurface != null ? videoSurface.getWidth() : 0;
+        int h = videoSurface != null ? videoSurface.getHeight() : 0;
+        liveRecorder = new com.tri.djicontrol.media.LiveStreamRecorder(out, w, h, lat, lon);
+    }
+
+    private void stopLiveRecording() {
+        com.tri.djicontrol.media.LiveStreamRecorder r = liveRecorder;
+        if (r == null) return;
+        liveRecorder = null;
+        r.stop((file, durationMs, error) -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (file != null) {
+                Toast.makeText(MainActivity.this, String.format(Locale.US,
+                        "Đã lưu bản xem nhanh (%s) • Xem ở Lưu trữ > Trên điện thoại",
+                        formatDuration(durationMs)), Toast.LENGTH_LONG).show();
+            } else {
+                android.util.Log.w("LiveRec", "Không ghi được bản xem nhanh: " + error);
+                Toast.makeText(MainActivity.this, "Không ghi được bản xem nhanh: " + error,
+                        Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
@@ -1216,108 +1473,459 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))) * 1000;
     }
 
-    private List<LocationCoordinate2D> generateGrid(List<LatLng> polygon, double spacingMeters) {
-        List<LocationCoordinate2D> waypoints = new ArrayList<>();
-        if (polygon == null || polygon.size() < 3) return waypoints;
+    // =========================================================
+    // BAY QUÉT TỰ ĐỘNG (WP)
+    // =========================================================
+    private float wpAltitude = 10f;
+    private double wpSpacing = 5.0;
+    private float wpSpeed = 3f;
+    private boolean wpVideo = false;
+    private List<LocationCoordinate2D> plannedWaypoints = new ArrayList<>();
+    private GeoJsonSource fieldOutlineSource, wpDoneSource, wpStartSource;
+    private String wpStatusText = null;
+    private TextView activeWpEstimateView;   // dòng trạng thái trong hộp thoại WP đang mở (nếu có)
+    private Button activeWpStopButton;
 
-        double minLat = polygon.get(0).getLatitude();
-        double maxLat = minLat;
-        for (LatLng p : polygon) {
-            double currentLat = p.getLatitude();
-            if (currentLat < minLat) minLat = currentLat;
-            if (currentLat > maxLat) maxLat = currentLat;
+    /** Thêm các lớp bản đồ cho WP vào mini map (gọi trong lúc dựng style). */
+    private void setupWpMapLayers(Style style) {
+        fieldOutlineSource = new GeoJsonSource("wp-field-source");
+        style.addSource(fieldOutlineSource);
+        org.maplibre.android.style.layers.FillLayer fill =
+                new org.maplibre.android.style.layers.FillLayer("wp-field-fill", "wp-field-source");
+        fill.setProperties(org.maplibre.android.style.layers.PropertyFactory.fillColor("#2196F3"),
+                org.maplibre.android.style.layers.PropertyFactory.fillOpacity(0.20f));
+        style.addLayerBelow(fill, FLIGHT_PATH_LAYER_ID);
+
+        wpDoneSource = new GeoJsonSource("wp-done-source");
+        style.addSource(wpDoneSource);
+        LineLayer done = new LineLayer("wp-done-layer", "wp-done-source");
+        done.setProperties(lineColor("#4CAF50"), lineWidth(4.0f));
+        style.addLayer(done);
+
+        wpStartSource = new GeoJsonSource("wp-start-source");
+        style.addSource(wpStartSource);
+        org.maplibre.android.style.layers.CircleLayer start =
+                new org.maplibre.android.style.layers.CircleLayer("wp-start-layer", "wp-start-source");
+        start.setProperties(org.maplibre.android.style.layers.PropertyFactory.circleColor("#4CAF50"),
+                org.maplibre.android.style.layers.PropertyFactory.circleRadius(6f),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor("#FFFFFF"),
+                org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth(2f));
+        style.addLayer(start);
+
+        drawFieldOnMap();
+        drawPlanOnMap(false);
+    }
+
+    private void drawFieldOnMap() {
+        if (fieldOutlineSource == null) return;
+        if (fieldPoints.size() < 3) {
+            fieldOutlineSource.setGeoJson(org.maplibre.geojson.FeatureCollection.fromFeatures(new Feature[0]));
+            return;
+        }
+        // Sắp các góc theo vòng để vẽ đúng hình ruộng
+        double cLat = 0, cLng = 0;
+        for (LatLng p : fieldPoints) { cLat += p.getLatitude(); cLng += p.getLongitude(); }
+        final double fLat = cLat / fieldPoints.size(), fLng = cLng / fieldPoints.size();
+        List<LatLng> sorted = new ArrayList<>(fieldPoints);
+        sorted.sort((a, b) -> Double.compare(
+                Math.atan2(a.getLatitude() - fLat, a.getLongitude() - fLng),
+                Math.atan2(b.getLatitude() - fLat, b.getLongitude() - fLng)));
+        List<Point> ring = new ArrayList<>();
+        for (LatLng p : sorted) ring.add(Point.fromLngLat(p.getLongitude(), p.getLatitude()));
+        ring.add(ring.get(0));
+        List<List<Point>> rings = new ArrayList<>();
+        rings.add(ring);
+        fieldOutlineSource.setGeoJson(Feature.fromGeometry(org.maplibre.geojson.Polygon.fromLngLats(rings)));
+    }
+
+    /** Vẽ lộ trình (vàng), điểm bắt đầu (xanh); fit camera nếu cần. */
+    private void drawPlanOnMap(boolean fitCamera) {
+        if (flightPathSource == null) return;
+        org.maplibre.geojson.FeatureCollection empty =
+                org.maplibre.geojson.FeatureCollection.fromFeatures(new Feature[0]);
+        if (wpDoneSource != null) wpDoneSource.setGeoJson(empty);
+        if (plannedWaypoints.size() < 2) {
+            flightPathSource.setGeoJson(empty);
+            if (wpStartSource != null) wpStartSource.setGeoJson(empty);
+            return;
+        }
+        List<Point> pts = new ArrayList<>();
+        for (LocationCoordinate2D wp : plannedWaypoints) pts.add(Point.fromLngLat(wp.getLongitude(), wp.getLatitude()));
+        flightPathSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(pts)));
+        if (wpStartSource != null) wpStartSource.setGeoJson(Feature.fromGeometry(pts.get(0)));
+
+        if (fitCamera && miniMapLibreMap != null) {
+            try {
+                if (miniMapLibreMap.getLocationComponent().isLocationComponentActivated()) {
+                    // Tắt bám theo vị trí điện thoại để bản đồ đứng yên ở ruộng
+                    miniMapLibreMap.getLocationComponent().setCameraMode(CameraMode.NONE);
+                }
+            } catch (Exception ignored) {}
+            org.maplibre.android.geometry.LatLngBounds.Builder b = new org.maplibre.android.geometry.LatLngBounds.Builder();
+            for (LocationCoordinate2D wp : plannedWaypoints) b.include(new LatLng(wp.getLatitude(), wp.getLongitude()));
+            for (LatLng p : fieldPoints) b.include(p);
+            try {
+                miniMapLibreMap.easeCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngBounds(b.build(), 30));
+            } catch (Exception ignored) {}
+        }
+    }
+
+    /** Vẽ phần đường đã bay (xanh lá) theo tiến độ nhiệm vụ. */
+    private void drawProgressOnMap(int reachedIndex) {
+        if (wpDoneSource == null || plannedWaypoints.isEmpty()) return;
+        List<Point> pts = new ArrayList<>();
+        for (int i = 0; i < Math.min(reachedIndex, plannedWaypoints.size()); i++) {
+            LocationCoordinate2D wp = plannedWaypoints.get(i);
+            pts.add(Point.fromLngLat(wp.getLongitude(), wp.getLatitude()));
+        }
+        try {
+            Aircraft a = (Aircraft) DJISDKManager.getInstance().getProduct();
+            dji.common.flightcontroller.LocationCoordinate3D loc = a.getFlightController().getState().getAircraftLocation();
+            if (loc != null && !Double.isNaN(loc.getLatitude())) pts.add(Point.fromLngLat(loc.getLongitude(), loc.getLatitude()));
+        } catch (Exception ignored) {}
+        if (pts.size() >= 2) wpDoneSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(pts)));
+    }
+
+    private static float parseFloat(EditText e, float def) {
+        try {
+            float v = Float.parseFloat(e.getText().toString().trim().replace(',', '.'));
+            return Float.isNaN(v) ? def : v;
+        } catch (Exception ex) {
+            return def;
+        }
+    }
+
+    /** Khoảng cách giữa 2 lần chụp = khoảng cách đường bay (lưới ảnh vuông, chồng ảnh đều 2 chiều). */
+    private double wpPhotoDistance() {
+        return wpSpacing;
+    }
+
+    /**
+     * Tốc độ bay giữa các điểm. Chế độ chụp ảnh: drone DỪNG HẲN tại mỗi điểm chụp rồi mới bấm
+     * (FlightMissionManager) nên không cần bay chậm nữa -> dùng đúng tốc độ người dùng nhập.
+     */
+    private float wpEffectiveSpeed() {
+        return wpSpeed;
+    }
+
+    /** Số ảnh dự kiến (1 ảnh mỗi wpPhotoDistance mét). */
+    private int wpEstimatedShots(GridPlanner.Plan plan) {
+        return (int) Math.ceil(plan.lengthMeters / wpPhotoDistance()) + 1;
+    }
+
+    /** Thời gian quét (phút) = bay + dừng chụp ở mỗi điểm (chế độ ảnh). */
+    private double wpEstimatedMinutes(GridPlanner.Plan plan) {
+        double sec = plan.lengthMeters / wpEffectiveSpeed();
+        if (!wpVideo) sec += wpEstimatedShots(plan) * FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE;
+        return sec / 60.0;
+    }
+
+    private GridPlanner.Plan lastWpPlan = null;
+
+    /** Hộp thoại xác nhận trước khi bay quét: thông số, quy trình và checklist an toàn. */
+    private void showWpConfirmDialog(GridPlanner.Plan plan, Runnable onFly) {
+        android.app.Dialog cf = new android.app.Dialog(this, R.style.CfDialog);
+        cf.setContentView(R.layout.dialog_wp_confirm);
+        cf.setCancelable(true);
+
+        float speed = wpEffectiveSpeed();
+        double minutes = wpEstimatedMinutes(plan);
+        float transitAlt = Math.max(wpAltitude, 20f);
+        int shots = wpEstimatedShots(plan);
+
+        TextView tvMode = cf.findViewById(R.id.tvCfMode);
+        tvMode.setText(wpVideo ? "🎥  QUAY VIDEO" : "📷  CHỤP ẢNH");
+
+        // --- Thông số ---
+        LinearLayout row1 = cf.findViewById(R.id.cfStatsRow1);
+        LinearLayout row2 = cf.findViewById(R.id.cfStatsRow2);
+        addCfStat(row1, String.format(Locale.US, "%.2f ha", fieldAreaHa), "Diện tích ruộng");
+        addCfStat(row1, plan.lengthMeters >= 1000
+                ? String.format(Locale.US, "%.2f km", plan.lengthMeters / 1000.0)
+                : String.format(Locale.US, "%.0f m", plan.lengthMeters), "Quãng đường quét");
+        addCfStat(row1, String.format(Locale.US, "≈ %.0f phút", Math.max(1, Math.ceil(minutes))), "Thời gian quét");
+        addCfStat(row2, String.format(Locale.US, "%.0f m", wpAltitude), "Độ cao quét");
+        addCfStat(row2, String.format(Locale.US, "%.1f m/s", speed), "Tốc độ bay");
+        if (wpVideo) {
+            addCfStat(row2, plan.lineCount + " đường", "Số đường bay");
+        } else {
+            addCfStat(row2, "≈ " + shots + " ảnh", String.format(Locale.US, "Mỗi %.1f m 1 ảnh", wpPhotoDistance()));
         }
 
-        double stepLat = spacingMeters / 111320.0;
-        boolean leftToRight = true;
-        int polySize = polygon.size();
-
-        for (double lat = minLat; lat <= maxLat; lat += stepLat) {
-            List<Double> intersectLngs = new ArrayList<>();
-
-            for (int i = 0; i < polySize; i++) {
-                LatLng p1 = polygon.get(i);
-                LatLng p2 = polygon.get((i + 1) % polySize);
-
-                double lat1 = p1.getLatitude();
-                double lat2 = p2.getLatitude();
-
-                if ((lat1 <= lat && lat2 > lat) || (lat2 <= lat && lat1 > lat)) {
-                    double fraction = (lat - lat1) / (lat2 - lat1);
-                    double lng = p1.getLongitude() + fraction * (p2.getLongitude() - p1.getLongitude());
-                    intersectLngs.add(lng);
-                }
-            }
-
-            if (intersectLngs.size() >= 2) {
-                Collections.sort(intersectLngs);
-                double firstLng = intersectLngs.get(0);
-                double lastLng = intersectLngs.get(intersectLngs.size() - 1);
-
-                if (leftToRight) {
-                    waypoints.add(new LocationCoordinate2D(lat, firstLng));
-                    waypoints.add(new LocationCoordinate2D(lat, lastLng));
-                } else {
-                    waypoints.add(new LocationCoordinate2D(lat, lastLng));
-                    waypoints.add(new LocationCoordinate2D(lat, firstLng));
-                }
-                leftToRight = !leftToRight;
-            }
+        if (!wpVideo) {
+            TextView note = cf.findViewById(R.id.tvCfSpeedNote);
+            note.setText(String.format(Locale.US,
+                    "ⓘ Drone dừng hẳn ~%.0f s ở mỗi điểm chụp để ảnh nét (đã tính vào thời gian)",
+                    FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE));
+            note.setVisibility(View.VISIBLE);
         }
-        return waypoints;
+        if (minutes > 20) {
+            TextView warn = cf.findViewById(R.id.tvCfWarning);
+            warn.setText("⚠  Thời gian quét lâu hơn 1 pin Mini 2 (~25 phút bay). "
+                    + "Nên tăng khoảng cách đường bay hoặc chia nhỏ ruộng.");
+            warn.setVisibility(View.VISIBLE);
+        }
+
+        // --- Quy trình ---
+        LinearLayout steps = cf.findViewById(R.id.cfStepsContainer);
+        java.util.List<String> stepTexts = new ArrayList<>();
+        stepTexts.add("Tự cất cánh (nếu đang ở mặt đất)");
+        stepTexts.add(String.format(Locale.US, "Lên độ cao an toàn %.0f m", transitAlt));
+        stepTexts.add("Bay tới góc bắt đầu của ruộng");
+        stepTexts.add(String.format(Locale.US, "%sQuét zigzag %d đường, %s",
+                transitAlt > wpAltitude ? String.format(Locale.US, "Hạ về %.0f m • ", wpAltitude) : "",
+                plan.lineCount, wpVideo ? "quay liên tục" : "dừng lại chụp mỗi điểm"));
+        stepTexts.add("Dừng camera và tự bay về Home");
+        LayoutInflater inf = LayoutInflater.from(this);
+        for (int i = 0; i < stepTexts.size(); i++) {
+            View item = inf.inflate(R.layout.item_cf_step, steps, false);
+            ((TextView) item.findViewById(R.id.tvStepNo)).setText(String.valueOf(i + 1));
+            ((TextView) item.findViewById(R.id.tvStepText)).setText(stepTexts.get(i));
+            steps.addView(item);
+        }
+
+        // --- Checklist: chỉ cho bay khi đã tick đủ ---
+        CheckBox cb1 = cf.findViewById(R.id.cbCfObstacle);
+        CheckBox cb2 = cf.findViewById(R.id.cbCfBattery);
+        CheckBox cb3 = cf.findViewById(R.id.cbCfHome);
+        Button btnFly = cf.findViewById(R.id.btnCfFly);
+        TextView hint = cf.findViewById(R.id.tvCfHint);
+        android.widget.CompoundButton.OnCheckedChangeListener check = (b, c) -> {
+            boolean ok = cb1.isChecked() && cb2.isChecked() && cb3.isChecked();
+            btnFly.setEnabled(ok);
+            hint.setText(ok ? "Có thể bấm DỪNG hoặc RTH bất cứ lúc nào"
+                            : "Tick đủ 3 mục kiểm tra để bắt đầu bay");
+        };
+        cb1.setOnCheckedChangeListener(check);
+        cb2.setOnCheckedChangeListener(check);
+        cb3.setOnCheckedChangeListener(check);
+        check.onCheckedChanged(null, false);
+
+        cf.findViewById(R.id.btnCfCancel).setOnClickListener(v -> cf.dismiss());
+        btnFly.setOnClickListener(v -> {
+            cf.dismiss();
+            onFly.run();
+        });
+
+        cf.show();
+        if (cf.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int width = (int) Math.min(dm.widthPixels * 0.9f, 660 * dm.density);
+            cf.getWindow().setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    private void addCfStat(LinearLayout row, String value, String label) {
+        View cell = LayoutInflater.from(this).inflate(R.layout.item_cf_stat, row, false);
+        ((TextView) cell.findViewById(R.id.tvStatValue)).setText(value);
+        ((TextView) cell.findViewById(R.id.tvStatLabel)).setText(label);
+        if (row.getChildCount() > 0) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) cell.getLayoutParams();
+            lp.setMarginStart((int) (6 * getResources().getDisplayMetrics().density));
+            cell.setLayoutParams(lp);
+        }
+        row.addView(cell);
+    }
+
+    private String buildPlanSummary(GridPlanner.Plan plan) {
+        float speed = wpEffectiveSpeed();
+        double minutes = wpEstimatedMinutes(plan);
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(Locale.US, "Lộ trình: %d đường bay, %d điểm, dài %.0f m\n",
+                plan.lineCount, plan.waypoints.size(), plan.lengthMeters));
+        sb.append(String.format(Locale.US, "Độ cao %.0f m • cách %.1f m • tốc độ %.1f m/s\n",
+                wpAltitude, wpSpacing, speed));
+        sb.append(String.format(Locale.US, "Thời gian quét ≈ %.1f phút", minutes));
+        if (!wpVideo) {
+            sb.append(String.format(Locale.US, " • ≈ %d ảnh (mỗi %.1f m, dừng ~%.0f s/ảnh)",
+                    wpEstimatedShots(plan), wpPhotoDistance(), FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE));
+        } else {
+            sb.append(" • quay video liên tục");
+        }
+        if (minutes > 20) sb.append("\n⚠ Lâu hơn 1 pin Mini 2 (~25 phút bay). Nên tăng khoảng cách hoặc chia ruộng.");
+        return sb.toString();
+    }
+
+    /** Tạo lưới từ 4 góc ruộng + thông số (kết quả lưu vào plannedWaypoints). */
+    private GridPlanner.Plan createPlan() {
+        double[] lats = new double[fieldPoints.size()];
+        double[] lngs = new double[fieldPoints.size()];
+        for (int i = 0; i < fieldPoints.size(); i++) {
+            lats[i] = fieldPoints.get(i).getLatitude();
+            lngs[i] = fieldPoints.get(i).getLongitude();
+        }
+        GridPlanner.Plan plan = GridPlanner.plan(lats, lngs, wpSpacing);
+        List<LocationCoordinate2D> wps = new ArrayList<>(plan.waypoints);
+
+        // Bắt đầu từ đầu lộ trình gần drone hơn để đỡ bay vòng
+        try {
+            Aircraft a = (Aircraft) DJISDKManager.getInstance().getProduct();
+            dji.common.flightcontroller.LocationCoordinate3D loc = a.getFlightController().getState().getAircraftLocation();
+            if (loc != null && !Double.isNaN(loc.getLatitude()) && wps.size() >= 2) {
+                LocationCoordinate2D s = wps.get(0), e = wps.get(wps.size() - 1);
+                if (GridPlanner.distance(loc.getLatitude(), loc.getLongitude(), e.getLatitude(), e.getLongitude())
+                        < GridPlanner.distance(loc.getLatitude(), loc.getLongitude(), s.getLatitude(), s.getLongitude())) {
+                    Collections.reverse(wps);
+                }
+            }
+        } catch (Exception ignored) {}
+
+        plannedWaypoints = wps;
+        return plan;
     }
 
     private void openWPDialog() {
-        Dialog dialog = new Dialog(MainActivity.this);
+        Dialog dialog = new Dialog(MainActivity.this, R.style.CfDialog);
         dialog.setContentView(R.layout.dialog_wp);
 
         Button btnCloseWP = dialog.findViewById(R.id.btnCloseWP);
         Button btnEditWPField = dialog.findViewById(R.id.btnEditWPField);
         TextView tvWPFieldStatus = dialog.findViewById(R.id.tvWPFieldStatus);
         TextView tvWPFieldArea = dialog.findViewById(R.id.tvWPFieldArea);
-        Button btnStartMapping = dialog.findViewById(R.id.btnStartMapping);
+        EditText edtAlt = dialog.findViewById(R.id.edtWPAltitude);
+        EditText edtSpacing = dialog.findViewById(R.id.edtWPLineSpacing);
+        EditText edtSpeed = dialog.findViewById(R.id.edtWPSpeed);
+        android.widget.RadioButton rbPhoto = dialog.findViewById(R.id.rbWPPhoto);
+        android.widget.RadioButton rbVideo = dialog.findViewById(R.id.rbWPVideo);
+        TextView tvEstimate = dialog.findViewById(R.id.tvWPEstimate);
+        Button btnClear = dialog.findViewById(R.id.btnClearWP);
+        Button btnCreate = dialog.findViewById(R.id.btnCreateWP);
+        Button btnStart = dialog.findViewById(R.id.btnStartMapping);
+        Button btnStop = dialog.findViewById(R.id.btnConfirmWP);
 
-        if (fieldPoints.size() == 4) {
-            tvWPFieldStatus.setText("Đã xác định khu vực");
-            tvWPFieldArea.setText(String.format(Locale.US, "Diện tích: %.2f ha", fieldAreaHa));
-            if(btnStartMapping != null) btnStartMapping.setVisibility(View.VISIBLE);
-        } else {
-            tvWPFieldStatus.setText("Chưa xác định khu vực");
-            tvWPFieldArea.setText("Diện tích: 0.00 ha");
-            if(btnStartMapping != null) btnStartMapping.setVisibility(View.GONE);
+        boolean hasField = fieldPoints.size() == 4;
+        com.tri.djicontrol.field.SavedFieldStore.SavedField curField =
+                com.tri.djicontrol.field.SavedFieldStore.get(this, currentFieldId);
+        tvWPFieldStatus.setText(!hasField ? "Chưa chọn khu vực — bấm nút bên dưới"
+                : curField != null ? curField.name + " • " + curField.statusLabel()
+                : "Đã chọn khu vực (4 góc ruộng) • chưa lưu");
+
+        // Lưu ruộng / mở ruộng đã lưu
+        Button btnSaveField = dialog.findViewById(R.id.btnSaveField);
+        Button btnSavedFields = dialog.findViewById(R.id.btnSavedFields);
+        int savedCount = com.tri.djicontrol.field.SavedFieldStore.list(this).size();
+        btnSavedFields.setText(savedCount > 0 ? "Ruộng đã lưu (" + savedCount + ")" : "Ruộng đã lưu");
+        btnSaveField.setEnabled(hasField);
+        btnSaveField.setOnClickListener(v -> showSaveFieldDialog(dialog));
+        btnSavedFields.setOnClickListener(v -> showSavedFieldsDialog(dialog));
+        tvWPFieldArea.setText(String.format(Locale.US, "%.2f ha", hasField ? fieldAreaHa : 0.0));
+        View fieldDot = dialog.findViewById(R.id.wpFieldDot);
+        if (fieldDot != null) {
+            fieldDot.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
+                    hasField ? 0xFF69F0AE : 0xFFFFB74D));
         }
 
-        if(btnStartMapping != null) {
-            btnStartMapping.setOnClickListener(view -> {
-                if (missionManager != null && fieldPoints.size() == 4) {
-                    float targetAltitude = 30.0f;
-                    double pathSpacing = 20.0;
+        // Nhớ thông số lần trước
+        edtAlt.setText(String.format(Locale.US, "%.0f", wpAltitude));
+        edtSpacing.setText(String.format(Locale.US, "%.1f", wpSpacing));
+        edtSpeed.setText(String.format(Locale.US, "%.1f", wpSpeed));
+        if (wpVideo) rbVideo.setChecked(true); else rbPhoto.setChecked(true);
+        EditText edtBattery = dialog.findViewById(R.id.edtWPBattery);
+        edtBattery.setText(String.valueOf(wpLowBattery));
 
-                    List<LocationCoordinate2D> gridWaypoints = generateGrid(fieldPoints, pathSpacing);
+        boolean running = missionManager != null && missionManager.isRunning();
+        btnStop.setVisibility(running ? View.VISIBLE : View.GONE);
+        btnStart.setVisibility(View.VISIBLE);
+        btnStart.setEnabled(!running);
+        btnCreate.setEnabled(!running);
+        btnClear.setEnabled(!running);
+        btnEditWPField.setEnabled(!running);
+        if (running && wpStatusText != null) tvEstimate.setText(wpStatusText);
+        activeWpEstimateView = tvEstimate;
+        activeWpStopButton = btnStop;
+        dialog.setOnDismissListener(d -> { activeWpEstimateView = null; activeWpStopButton = null; });
 
-                    if (!gridWaypoints.isEmpty()) {
-                        if (miniMapLibreMap != null && flightPathSource != null) {
-                            List<Point> gridMapPoints = new ArrayList<>();
-                            for (LocationCoordinate2D wp : gridWaypoints) {
-                                gridMapPoints.add(Point.fromLngLat(wp.getLongitude(), wp.getLatitude()));
-                            }
-                            flightPathSource.setGeoJson(Feature.fromGeometry(LineString.fromLngLats(gridMapPoints)));
-                        }
+        // Đọc + kiểm tra thông số. Trả false (kèm báo lỗi trên ô nhập) nếu sai.
+        java.util.function.BooleanSupplier readParams = () -> {
+            float alt = parseFloat(edtAlt, -1);
+            float spacing = parseFloat(edtSpacing, -1);
+            float speed = parseFloat(edtSpeed, -1);
+            if (alt < 5 || alt > 120) { edtAlt.setError("5 – 120 m"); return false; }
+            if (spacing < 1 || spacing > 100) { edtSpacing.setError("1 – 100 m"); return false; }
+            if (speed < 0.5f || speed > 10) { edtSpeed.setError("0.5 – 10 m/s"); return false; }
+            float bat = parseFloat(edtBattery, -1);
+            if (bat < 20 || bat > 60) { edtBattery.setError("20 – 60 %"); return false; }
+            wpAltitude = alt;
+            wpSpacing = spacing;
+            wpSpeed = speed;
+            wpVideo = rbVideo.isChecked();
+            wpLowBattery = Math.round(bat);
+            if (missionManager != null) missionManager.setLowBatteryThreshold(wpLowBattery);
+            return true;
+        };
 
-                        Toast.makeText(MainActivity.this, "Đã tạo " + gridWaypoints.size() + " điểm quét!", Toast.LENGTH_SHORT).show();
-                        dialog.dismiss();
-                    }
-                } else {
-                    Toast.makeText(MainActivity.this, "Vui lòng khoanh vùng và kết nối Drone!", Toast.LENGTH_SHORT).show();
-                }
+        // Dải thông báo nhiệm vụ đang dở -> bấm để bay tiếp
+        View resumeBanner = dialog.findViewById(R.id.wpResumeBanner);
+        com.tri.djicontrol.flight.MissionCheckpoint pendingCp =
+                running ? null : com.tri.djicontrol.flight.MissionCheckpoint.load(this);
+        if (pendingCp != null) {
+            resumeBanner.setVisibility(View.VISIBLE);
+            ((TextView) dialog.findViewById(R.id.tvWPResumeInfo)).setText(String.format(Locale.US,
+                    "Nhiệm vụ đang dở: đã quét %d%%%s • dừng do %s",
+                    pendingCp.progressPercent(),
+                    pendingCp.video ? "" : ", " + pendingCp.photoCount + " ảnh",
+                    pendingCp.reason.toLowerCase(Locale.ROOT)));
+            dialog.findViewById(R.id.btnWPResume).setOnClickListener(v -> {
+                dialog.dismiss();
+                showResumeDialog(pendingCp);
             });
         }
+
+        Runnable buildPlan = () -> {
+            if (fieldPoints.size() != 4) {
+                Toast.makeText(MainActivity.this, "Vui lòng chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            if (!readParams.getAsBoolean()) return;
+            GridPlanner.Plan plan = createPlan();
+            lastWpPlan = plan;
+            if (plannedWaypoints.size() < 2) {
+                tvEstimate.setText("Không tạo được lộ trình. Khoảng cách đường bay quá lớn so với ruộng?");
+                drawPlanOnMap(false);
+                return;
+            }
+            drawPlanOnMap(true);
+            tvEstimate.setText(buildPlanSummary(plan));
+        };
+
+        btnCreate.setOnClickListener(v -> buildPlan.run());
+
+        btnClear.setOnClickListener(v -> {
+            plannedWaypoints = new ArrayList<>();
+            drawPlanOnMap(false);
+            tvEstimate.setText("Đã xóa lộ trình");
+        });
+
+        btnStart.setOnClickListener(v -> {
+            if (missionManager == null || DJISDKManager.getInstance().getProduct() == null) {
+                Toast.makeText(MainActivity.this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            buildPlan.run(); // luôn tạo lại theo thông số mới nhất
+            if (plannedWaypoints.size() < 2 || lastWpPlan == null) return;
+
+            showWpConfirmDialog(lastWpPlan, () -> {
+                startWpMission();
+                btnStop.setVisibility(View.VISIBLE);
+                btnStart.setEnabled(false);
+                btnCreate.setEnabled(false);
+                btnClear.setEnabled(false);
+                btnEditWPField.setEnabled(false);
+            });
+        });
+
+        btnStop.setOnClickListener(v -> {
+            if (missionManager != null) missionManager.stopAndReturnHome();
+            Toast.makeText(MainActivity.this, "Đã dừng nhiệm vụ, drone bay về nhà", Toast.LENGTH_SHORT).show();
+        });
 
         btnCloseWP.setOnClickListener(view -> dialog.dismiss());
 
         btnEditWPField.setOnClickListener(view -> {
             Intent intent = new Intent(MainActivity.this, MapActivity.class);
             intent.putExtra("EDIT_FIELD", true);
+            // Ruộng đang chỉnh không vẽ lặp trong lớp "ruộng đã lưu" trên bản đồ
+            if (currentFieldId != null) intent.putExtra("CURRENT_FIELD_ID", currentFieldId);
             if (fieldPoints.size() == 4) {
                 double[] latitudes = new double[fieldPoints.size()];
                 double[] longitudes = new double[fieldPoints.size()];
@@ -1332,14 +1940,520 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             startActivityForResult(intent, REQUEST_FIELD_MAP);
         });
 
+        // Có ruộng mà chưa bay -> tạo lộ trình luôn để thấy ngay trên map
+        // (trừ khi đang có nhiệm vụ dở: giữ lộ trình cũ trên map để còn bay tiếp)
+        if (hasField && !running && pendingCp == null) buildPlan.run();
+
         dialog.show();
         if (dialog.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
             dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.80),
-                    (int) (getResources().getDisplayMetrics().heightPixels * 0.85)
+                    (int) Math.min(dm.widthPixels * 0.86f, 780 * dm.density),
+                    (int) (dm.heightPixels * 0.9f)
             );
         }
+    }
+
+    private void startWpMission() {
+        if (missionManager == null) return;
+        final boolean video = wpVideo;
+        resetCapturePanel(video);
+        com.tri.djicontrol.flight.MissionCheckpoint.clear(this); // nhiệm vụ mới thay cho nhiệm vụ dở cũ
+        missionManager.onBatteryUpdate(batteryPercent);
+        missionManager.setLowBatteryThreshold(wpLowBattery);
+        missionManager.startMappingMission(new ArrayList<>(plannedWaypoints), wpAltitude, wpEffectiveSpeed(),
+                video, wpPhotoDistance(), createWpListener(video));
+        // Gắn chuyến bay vào mảnh ruộng đang chọn (nếu đã lưu) để đánh dấu đã bay
+        if (missionManager.isRunning() && currentFieldId != null) {
+            com.tri.djicontrol.field.SavedFieldStore.SavedField f =
+                    com.tri.djicontrol.field.SavedFieldStore.get(this, currentFieldId);
+            if (f != null) {
+                String mid = missionManager.getMissionId();
+                if (mid != null && !f.missionIds.contains(mid)) f.missionIds.add(mid);
+                f.altitude = wpAltitude;
+                f.spacing = wpSpacing;
+                f.speed = wpSpeed;
+                f.video = wpVideo;
+                f.lastFlownAt = System.currentTimeMillis();
+                if (!com.tri.djicontrol.field.SavedFieldStore.STATUS_DONE.equals(f.status)) {
+                    f.status = com.tri.djicontrol.field.SavedFieldStore.STATUS_PARTIAL;
+                }
+                f.updatedAt = System.currentTimeMillis();
+                com.tri.djicontrol.field.SavedFieldStore.put(this, f);
+            }
+        }
+    }
+
+    // =========================================================
+    // MẢNH RUỘNG ĐÃ LƯU
+    // =========================================================
+    /** Ruộng đang chọn có trong danh sách đã lưu (null = ruộng mới chưa lưu). */
+    private String currentFieldId = null;
+
+    private void showSaveFieldDialog(Dialog wpDialog) {
+        if (fieldPoints.size() != 4) {
+            Toast.makeText(this, "Chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        com.tri.djicontrol.field.SavedFieldStore.SavedField existing =
+                com.tri.djicontrol.field.SavedFieldStore.get(this, currentFieldId);
+
+        android.app.Dialog d = new android.app.Dialog(this, R.style.CfDialog);
+        d.setContentView(R.layout.dialog_field_name);
+        ((TextView) d.findViewById(R.id.tvFieldNameTitle))
+                .setText(existing != null ? "Cập nhật mảnh ruộng" : "Lưu mảnh ruộng");
+        ((TextView) d.findViewById(R.id.tvFieldNameInfo)).setText(String.format(Locale.US,
+                "%.2f ha • 4 góc • lưu kèm thông số bay hiện tại", fieldAreaHa));
+        EditText edt = d.findViewById(R.id.edtFieldName);
+        edt.setText(existing != null ? existing.name
+                : "Ruộng " + (com.tri.djicontrol.field.SavedFieldStore.list(this).size() + 1));
+        edt.selectAll();
+
+        // asNew = true: luôn tạo ruộng mới; false: cập nhật ruộng đang chọn (nếu có)
+        java.util.function.Consumer<Boolean> doSave = asNew -> {
+            String name = edt.getText().toString().trim();
+            if (name.isEmpty()) { edt.setError("Nhập tên ruộng"); return; }
+            com.tri.djicontrol.field.SavedFieldStore.SavedField f =
+                    (!asNew && existing != null) ? existing : new com.tri.djicontrol.field.SavedFieldStore.SavedField();
+            f.name = name;
+            f.lats = new double[4];
+            f.lngs = new double[4];
+            for (int i = 0; i < 4; i++) {
+                f.lats[i] = fieldPoints.get(i).getLatitude();
+                f.lngs[i] = fieldPoints.get(i).getLongitude();
+            }
+            f.areaHa = fieldAreaHa;
+            f.altitude = wpAltitude;
+            f.spacing = wpSpacing;
+            f.speed = wpSpeed;
+            f.video = wpVideo;
+            f.updatedAt = System.currentTimeMillis();
+            com.tri.djicontrol.field.SavedFieldStore.put(this, f);
+            currentFieldId = f.id;
+            d.dismiss();
+            Toast.makeText(this, "Đã lưu \"" + name + "\"", Toast.LENGTH_SHORT).show();
+            // Mở lại hộp thoại WP để cập nhật tên ruộng đang chọn
+            if (wpDialog != null) wpDialog.dismiss();
+            openWPDialog();
+        };
+        Button btnSaveNew = d.findViewById(R.id.btnFieldNameSaveNew);
+        if (existing != null) {
+            btnSaveNew.setVisibility(View.VISIBLE);
+            btnSaveNew.setOnClickListener(v -> doSave.accept(true));
+            ((Button) d.findViewById(R.id.btnFieldNameSave)).setText("Cập nhật");
+        }
+        d.findViewById(R.id.btnFieldNameSave).setOnClickListener(v -> doSave.accept(false));
+        d.findViewById(R.id.btnFieldNameCancel).setOnClickListener(v -> d.dismiss());
+        d.show();
+        if (d.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            d.getWindow().setLayout((int) Math.min(dm.widthPixels * 0.9f, 460 * dm.density),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        }
+    }
+
+    private void showSavedFieldsDialog(Dialog wpDialog) {
+        android.app.Dialog d = new android.app.Dialog(this, R.style.CfDialog);
+        d.setContentView(R.layout.dialog_field_list);
+        LinearLayout container = d.findViewById(R.id.fieldListContainer);
+        TextView info = d.findViewById(R.id.tvFieldListInfo);
+        View empty = d.findViewById(R.id.tvFieldListEmpty);
+        View scroll = d.findViewById(R.id.fieldListScroll);
+        Button btnSyncAll = d.findViewById(R.id.btnFieldSyncAll);
+
+        Runnable[] render = new Runnable[1];
+        render[0] = () -> {
+            container.removeAllViews();
+            List<com.tri.djicontrol.field.SavedFieldStore.SavedField> all =
+                    com.tri.djicontrol.field.SavedFieldStore.list(this);
+            int done = 0, pending = 0;
+            for (com.tri.djicontrol.field.SavedFieldStore.SavedField f : all) {
+                if (com.tri.djicontrol.field.SavedFieldStore.STATUS_DONE.equals(f.status)) done++;
+                if (f.needsSync()) pending++;
+                container.addView(buildSavedFieldRow(container, f, d, wpDialog, render[0]));
+            }
+            info.setText(String.format(Locale.US, "%d ruộng • %d đã bay xong%s", all.size(), done,
+                    pending > 0 ? " • " + pending + " chưa đẩy lên Cloud" : ""));
+            empty.setVisibility(all.isEmpty() ? View.VISIBLE : View.GONE);
+            scroll.setVisibility(all.isEmpty() ? View.GONE : View.VISIBLE);
+            btnSyncAll.setEnabled(pending > 0);
+            btnSyncAll.setAlpha(pending > 0 ? 1f : 0.45f);
+        };
+        render[0].run();
+
+        btnSyncAll.setOnClickListener(v -> {
+            List<com.tri.djicontrol.field.SavedFieldStore.SavedField> todo = new ArrayList<>();
+            for (com.tri.djicontrol.field.SavedFieldStore.SavedField f
+                    : com.tri.djicontrol.field.SavedFieldStore.list(this)) {
+                if (f.needsSync()) todo.add(f);
+            }
+            btnSyncAll.setEnabled(false);
+            uploadFieldsSequential(todo, 0, 0, btnSyncAll, render[0]);
+        });
+        d.findViewById(R.id.btnFieldListClose).setOnClickListener(v -> d.dismiss());
+        d.show();
+        if (d.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            d.getWindow().setLayout((int) Math.min(dm.widthPixels * 0.86f, 760 * dm.density),
+                    (int) (dm.heightPixels * 0.85f));
+        }
+    }
+
+    private View buildSavedFieldRow(LinearLayout parent, com.tri.djicontrol.field.SavedFieldStore.SavedField f,
+                                    android.app.Dialog listDialog, Dialog wpDialog, Runnable rerender) {
+        View row = LayoutInflater.from(this).inflate(R.layout.item_saved_field, parent, false);
+        ((TextView) row.findViewById(R.id.tvFieldName)).setText(f.name);
+        row.findViewById(R.id.tvFieldCurrent).setVisibility(f.id.equals(currentFieldId) ? View.VISIBLE : View.GONE);
+
+        String when = f.lastFlownAt > 0
+                ? "bay gần nhất " + new java.text.SimpleDateFormat("dd/MM HH:mm", Locale.US).format(new java.util.Date(f.lastFlownAt))
+                : "lưu " + new java.text.SimpleDateFormat("dd/MM HH:mm", Locale.US).format(new java.util.Date(f.createdAt));
+        ((TextView) row.findViewById(R.id.tvFieldInfo)).setText(String.format(Locale.US,
+                "%.2f ha • %s • %s%s", f.areaHa, f.statusLabel(), when, f.needsSync() ? "" : " • đã lên Cloud"));
+        row.findViewById(R.id.fieldStatusDot).setBackgroundTintList(
+                android.content.res.ColorStateList.valueOf(fieldStatusColor(f.status)));
+
+        Button btnSelect = row.findViewById(R.id.btnFieldSelect);
+        boolean running = missionManager != null && missionManager.isRunning();
+        btnSelect.setEnabled(!running);
+        btnSelect.setOnClickListener(v -> {
+            loadSavedField(f);
+            listDialog.dismiss();
+            if (wpDialog != null) wpDialog.dismiss();
+            openWPDialog();
+        });
+
+        Button btnCloud = row.findViewById(R.id.btnFieldCloud);
+        btnCloud.setText(f.needsSync() ? "Cloud" : "Đã lên ✓");
+        btnCloud.setOnClickListener(v -> {
+            btnCloud.setEnabled(false);
+            btnCloud.setText("Đang đẩy...");
+            uploadField(f, ok -> rerender.run());
+        });
+
+        row.findViewById(R.id.btnFieldDelete).setOnClickListener(v ->
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("Xóa \"" + f.name + "\"?")
+                        .setMessage("Mảnh ruộng sẽ bị xóa khỏi danh sách trên điện thoại "
+                                + "(dữ liệu đã đẩy lên Cloud vẫn còn).")
+                        .setPositiveButton("XÓA", (x, i) -> {
+                            com.tri.djicontrol.field.SavedFieldStore.delete(this, f.id);
+                            if (f.id.equals(currentFieldId)) currentFieldId = null;
+                            rerender.run();
+                        })
+                        .setNegativeButton("HỦY", null)
+                        .show());
+        return row;
+    }
+
+    /** Xanh = đã bay xong, vàng = bay dở, xám = chưa bay (dùng chung với bản đồ). */
+    static int fieldStatusColor(String status) {
+        if (com.tri.djicontrol.field.SavedFieldStore.STATUS_DONE.equals(status)) return 0xFF69F0AE;
+        if (com.tri.djicontrol.field.SavedFieldStore.STATUS_PARTIAL.equals(status)) return 0xFFFFD54F;
+        return 0xFF9AA0A6;
+    }
+
+    /** Nạp 4 góc + thông số bay của ruộng đã lưu để bay lại. */
+    private void loadSavedField(com.tri.djicontrol.field.SavedFieldStore.SavedField f) {
+        fieldPoints.clear();
+        for (int i = 0; i < f.lats.length && i < f.lngs.length; i++) {
+            fieldPoints.add(new LatLng(f.lats[i], f.lngs[i]));
+        }
+        fieldAreaHa = f.areaHa;
+        wpAltitude = f.altitude;
+        wpSpacing = f.spacing;
+        wpSpeed = f.speed;
+        wpVideo = f.video;
+        currentFieldId = f.id;
+        if (tvFieldArea != null) tvFieldArea.setText(String.format(Locale.US, "%.2f ha", fieldAreaHa));
+        plannedWaypoints = new ArrayList<>();
+        drawFieldOnMap();
+        drawPlanOnMap(false);
+        Toast.makeText(this, "Đã chọn \"" + f.name + "\"", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Đẩy GeoJSON của 1 ruộng lên Cloudinary. */
+    private void uploadField(com.tri.djicontrol.field.SavedFieldStore.SavedField f,
+                             java.util.function.Consumer<Boolean> done) {
+        com.tri.djicontrol.firebase.FirebaseHelper.uploadJson(this, "field_" + f.id,
+                com.tri.djicontrol.field.SavedFieldStore.toGeoJson(f),
+                com.tri.djicontrol.field.SavedFieldStore.cloudContext(f),
+                "dji_field," + f.id,
+                new com.tri.djicontrol.firebase.FirebaseHelper.UploadCallback() {
+                    @Override public void onProgress(int percent, long a, long b) {}
+
+                    @Override
+                    public void onSuccess(String url) {
+                        // Đọc lại bản mới nhất (có thể vừa được cập nhật trong lúc đẩy)
+                        com.tri.djicontrol.field.SavedFieldStore.SavedField cur =
+                                com.tri.djicontrol.field.SavedFieldStore.get(MainActivity.this, f.id);
+                        if (cur != null) {
+                            cur.cloudUrl = url;
+                            cur.cloudSyncedAt = Math.max(System.currentTimeMillis(), cur.updatedAt);
+                            com.tri.djicontrol.field.SavedFieldStore.put(MainActivity.this, cur);
+                        }
+                        Toast.makeText(MainActivity.this, "Đã đẩy \"" + f.name + "\" lên Cloud", Toast.LENGTH_SHORT).show();
+                        done.accept(true);
+                    }
+
+                    @Override
+                    public void onFailure(String message) {
+                        Toast.makeText(MainActivity.this, "Lỗi Cloud (" + f.name + "): " + message, Toast.LENGTH_LONG).show();
+                        done.accept(false);
+                    }
+                });
+    }
+
+    private void uploadFieldsSequential(List<com.tri.djicontrol.field.SavedFieldStore.SavedField> list,
+                                        int i, int ok, Button btn, Runnable rerender) {
+        if (i >= list.size()) {
+            Toast.makeText(this, "Đã đẩy " + ok + "/" + list.size() + " ruộng lên Cloud", Toast.LENGTH_SHORT).show();
+            rerender.run();
+            return;
+        }
+        btn.setText(String.format(Locale.US, "Đang đẩy %d/%d...", i + 1, list.size()));
+        uploadField(list.get(i), success -> uploadFieldsSequential(list, i + 1, ok + (success ? 1 : 0), btn, rerender));
+    }
+
+    /** Nhiệm vụ kết thúc -> cập nhật trạng thái mảnh ruộng gắn với chuyến bay đó. */
+    private void markFieldAfterMission(boolean completed) {
+        if (missionManager == null) return;
+        com.tri.djicontrol.field.SavedFieldStore.SavedField f =
+                com.tri.djicontrol.field.SavedFieldStore.findByMission(this, missionManager.getMissionId());
+        if (f == null) return;
+        if (completed) {
+            f.status = com.tri.djicontrol.field.SavedFieldStore.STATUS_DONE;
+            f.flightCount++;
+        } else if (!com.tri.djicontrol.field.SavedFieldStore.STATUS_DONE.equals(f.status)) {
+            f.status = com.tri.djicontrol.field.SavedFieldStore.STATUS_PARTIAL;
+        }
+        f.lastFlownAt = System.currentTimeMillis();
+        f.updatedAt = System.currentTimeMillis();
+        com.tri.djicontrol.field.SavedFieldStore.put(this, f);
+    }
+
+    /** Bay tiếp nhiệm vụ đang dở (sau khi thay pin). */
+    private void resumeWpMission(com.tri.djicontrol.flight.MissionCheckpoint cp) {
+        if (missionManager == null || DJISDKManager.getInstance().getProduct() == null) {
+            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (missionManager.isRunning()) {
+            Toast.makeText(this, "Nhiệm vụ đang chạy!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        // Hiện lại lộ trình gốc + phần đã quét trên bản đồ
+        plannedWaypoints = new ArrayList<>(cp.waypoints);
+        wpAltitude = cp.scanAltitude;
+        wpSpeed = cp.speed;
+        wpVideo = cp.video;
+        drawPlanOnMap(true);
+        if (cp.scanStarted) drawProgressOnMap(cp.nextIndex);
+        resetCapturePanel(cp.video);
+        wpCapturedPhotos = cp.photoCount;
+        updateCapturePanel();
+
+        missionManager.onBatteryUpdate(batteryPercent);
+        missionManager.setLowBatteryThreshold(wpLowBattery);
+        missionManager.resumeMission(cp, createWpListener(cp.video));
+        Toast.makeText(this, "Bay tiếp nhiệm vụ từ " + cp.progressPercent() + "%", Toast.LENGTH_SHORT).show();
+    }
+
+    private FlightMissionManager.MissionListener createWpListener(final boolean video) {
+        return new FlightMissionManager.MissionListener() {
+                    @Override
+                    public void onStatus(String status) {
+                        setWpStatus("WP: " + status);
+                    }
+
+                    @Override
+                    public void onProgress(int reachedIndex, int total, int photoCount) {
+                        drawProgressOnMap(reachedIndex);
+                        setWpStatus(String.format(Locale.US, "WP: đã qua điểm %d/%d",
+                                Math.min(reachedIndex, total), total));
+                        // Số ảnh hiện ở khung "Thông tin nhiệm vụ", không ở dòng trạng thái
+                        wpCapturedPhotos = photoCount;
+                        updateCapturePanel();
+                    }
+
+                    @Override
+                    public void onRecordingChanged(boolean recording) {
+                        if (recording) {
+                            wpRecordStartMs = System.currentTimeMillis();
+                            wpRecording = true;
+                            capturePanelHandler.removeCallbacks(capturePanelTicker);
+                            capturePanelHandler.post(capturePanelTicker);
+                        } else if (wpRecording) {
+                            wpRecording = false;
+                            wpRecordedMs = System.currentTimeMillis() - wpRecordStartMs;
+                            capturePanelHandler.removeCallbacks(capturePanelTicker);
+                            updateCapturePanel();
+                        }
+                    }
+
+                    @Override
+                    public void onCheckpointSaved(com.tri.djicontrol.flight.MissionCheckpoint checkpoint) {
+                        // Lần kết nối/thay pin tới sẽ được hỏi bay tiếp
+                        resumePromptShown = false;
+                    }
+
+                    @Override
+                    public void onFinished(boolean completed, String message) {
+                        if (wpRecording) onRecordingChanged(false);
+                        markFieldAfterMission(completed); // đánh dấu ruộng đã bay / bay dở
+                        setWpStatus("WP: " + message);
+                        if (activeWpStopButton != null) activeWpStopButton.setVisibility(View.GONE);
+                        boolean paused = !completed
+                                && com.tri.djicontrol.flight.MissionCheckpoint.load(MainActivity.this) != null;
+                        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                                .setTitle(completed ? "Hoàn thành bay quét"
+                                        : paused ? "Tạm dừng — đã lưu tiến độ" : "Nhiệm vụ đã dừng")
+                                .setMessage(message + (completed
+                                        ? "\n\nMở Lưu trữ > THẺ NHỚ DRONE để xem " + (video ? "video." : "ảnh.")
+                                        : paused ? "\n\nKhi drone hạ cánh: thay pin đầy và bật lại drone, "
+                                                + "app sẽ tự hỏi để bay tiếp." : ""))
+                                .setPositiveButton("OK", null)
+                                .show();
+                    }
+                };
+    }
+
+    // =========================================================
+    // BAY TIẾP NHIỆM VỤ DỞ KHI PIN ĐÃ ĐẦY
+    // =========================================================
+    /** Ngưỡng pin (%) để dừng quét và về nhà — chỉnh trong hộp thoại Thiết lập lộ trình. */
+    private int wpLowBattery = FlightMissionManager.DEFAULT_LOW_BATTERY_PERCENT;
+    /** Pin tối thiểu (%) để cho phép bay tiếp. */
+    private static final int RESUME_MIN_BATTERY = 90;
+    private boolean resumePromptShown = false;
+
+    /** Gọi mỗi lần pin cập nhật: drone đang ở đất + pin đầy + có nhiệm vụ dở -> hỏi bay tiếp (1 lần). */
+    private void maybePromptResume() {
+        if (resumePromptShown || isFinishing() || batteryPercent < RESUME_MIN_BATTERY) return;
+        if (missionManager == null || missionManager.isRunning()) return;
+        try {
+            FlightController fc = ((Aircraft) DJISDKManager.getInstance().getProduct()).getFlightController();
+            if (fc == null || fc.getState() == null || fc.getState().isFlying()) return;
+        } catch (Exception e) {
+            return;
+        }
+        com.tri.djicontrol.flight.MissionCheckpoint cp = com.tri.djicontrol.flight.MissionCheckpoint.load(this);
+        // Chỉ kiểm tra 1 lần; khi có tiến độ mới được lưu (onCheckpointSaved) sẽ kiểm tra lại
+        resumePromptShown = true;
+        if (cp != null) showResumeDialog(cp);
+    }
+
+    private void showResumeDialog(com.tri.djicontrol.flight.MissionCheckpoint cp) {
+        android.app.Dialog d = new android.app.Dialog(this, R.style.CfDialog);
+        d.setContentView(R.layout.dialog_wp_resume);
+        d.setCancelable(true);
+
+        int pct = cp.progressPercent();
+        ((TextView) d.findViewById(R.id.tvResumePercent)).setText(pct + "%");
+        ((android.widget.ProgressBar) d.findViewById(R.id.pbResume)).setProgress(pct);
+        ((TextView) d.findViewById(R.id.tvResumeMission)).setText(
+                (cp.missionId != null ? cp.missionId : "Nhiệm vụ") + " • " + (cp.video ? "Quay video" : "Chụp ảnh"));
+        ((TextView) d.findViewById(R.id.tvResumeReason)).setText(String.format(Locale.US,
+                "Dừng lúc %s • %s (pin còn %d%%)",
+                new java.text.SimpleDateFormat("HH:mm dd/MM", Locale.US).format(new java.util.Date(cp.savedAtMs)),
+                cp.reason, cp.batteryAtPause));
+
+        LinearLayout stats = d.findViewById(R.id.resumeStats);
+        int remaining = Math.max(0, cp.waypoints.size() - Math.max(cp.nextIndex, 0));
+        addCfStat(stats, cp.video ? "Video" : String.valueOf(cp.photoCount), cp.video ? "Chế độ" : "Ảnh đã chụp");
+        addCfStat(stats, remaining + " điểm", "Còn lại");
+        addCfStat(stats, batteryPercent + "%", "Pin hiện tại");
+
+        Button btnGo = d.findViewById(R.id.btnResumeGo);
+        TextView hint = d.findViewById(R.id.tvResumeHint);
+        boolean enough = batteryPercent >= RESUME_MIN_BATTERY;
+        btnGo.setEnabled(enough);
+        hint.setText(enough
+                ? "Drone sẽ tự cất cánh, bay thẳng tới chỗ đã dừng rồi quét tiếp phần còn lại."
+                : "Pin cần ≥ " + RESUME_MIN_BATTERY + "% để bay tiếp. Hãy thay pin đầy.");
+
+        btnGo.setOnClickListener(v -> {
+            d.dismiss();
+            resumeWpMission(cp);
+        });
+        d.findViewById(R.id.btnResumeLater).setOnClickListener(v -> d.dismiss());
+        d.findViewById(R.id.btnResumeDiscard).setOnClickListener(v ->
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("Hủy nhiệm vụ đang dở?")
+                        .setMessage("Tiến độ " + pct + "% sẽ bị xóa, không thể bay tiếp được nữa.")
+                        .setPositiveButton("HỦY NHIỆM VỤ", (x, i) -> {
+                            com.tri.djicontrol.flight.MissionCheckpoint.clear(this);
+                            d.dismiss();
+                        })
+                        .setNegativeButton("KHÔNG", null)
+                        .show());
+
+        d.show();
+        if (d.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            d.getWindow().setLayout((int) Math.min(dm.widthPixels * 0.9f, 520 * dm.density),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+    }
+
+    // =========================================================
+    // KHUNG "THÔNG TIN NHIỆM VỤ": dữ liệu thu thập của chuyến bay quét (WP)
+    // =========================================================
+    private boolean wpCaptureVideo = false;
+    private int wpCapturedPhotos = 0;
+    private boolean wpRecording = false;
+    private long wpRecordStartMs = 0, wpRecordedMs = 0;
+    private final Handler capturePanelHandler = new Handler(Looper.getMainLooper());
+    private final Runnable capturePanelTicker = new Runnable() {
+        @Override
+        public void run() {
+            updateCapturePanel();
+            if (wpRecording) capturePanelHandler.postDelayed(this, 1000);
+        }
+    };
+
+    private void resetCapturePanel(boolean video) {
+        capturePanelHandler.removeCallbacks(capturePanelTicker);
+        wpCaptureVideo = video;
+        wpCapturedPhotos = 0;
+        wpRecording = false;
+        wpRecordStartMs = 0;
+        wpRecordedMs = 0;
+        updateCapturePanel();
+    }
+
+    private void updateCapturePanel() {
+        if (tvPhotoCount == null) return;
+        if (tvCaptureLabel != null) tvCaptureLabel.setText(wpCaptureVideo ? "Video bay quét" : "Ảnh bay quét");
+        String value;
+        int color = 0xFF69F0AE;
+        if (!wpCaptureVideo) {
+            value = wpCapturedPhotos + " ảnh";
+        } else if (wpRecording) {
+            value = "● REC " + formatDuration(System.currentTimeMillis() - wpRecordStartMs);
+            color = 0xFFFF5252;
+        } else if (wpRecordedMs > 0) {
+            value = "1 video • " + formatDuration(wpRecordedMs);
+        } else {
+            value = "Chờ quay";
+        }
+        tvPhotoCount.setText(value);
+        tvPhotoCount.setTextColor(color);
+    }
+
+    private static String formatDuration(long ms) {
+        long s = Math.max(0, ms / 1000);
+        return s >= 3600
+                ? String.format(Locale.US, "%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+                : String.format(Locale.US, "%02d:%02d", s / 60, s % 60);
+    }
+
+    private void setWpStatus(String text) {
+        wpStatusText = text;
+        if (tvStatus != null) tvStatus.setText(text);
+        if (activeWpEstimateView != null) activeWpEstimateView.setText(text);
     }
 
     @Override
@@ -1367,6 +2481,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             if (tvFieldArea != null) {
                 tvFieldArea.setText(String.format(Locale.US, "%.2f ha", fieldAreaHa));
             }
+            // Ruộng mới -> bỏ lộ trình cũ, vẽ lại ruộng (lộ trình mới được tạo khi mở hộp thoại WP)
+            plannedWaypoints = new ArrayList<>();
+            drawFieldOnMap();
+            drawPlanOnMap(false);
             openWPDialog();
         }
     }
@@ -1396,6 +2514,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     @Override
     protected void onDestroy() {
+        capturePanelHandler.removeCallbacks(capturePanelTicker);
+        stopLiveRecording(); // đóng file MP4 đang ghi để không bị hỏng
         if (miniMapView != null) miniMapView.onDestroy();
         if (missionManager != null) missionManager.cancelMission();
         if (codecManager != null) {
@@ -1608,22 +2728,22 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private final VideoFeeder.VideoDataListener receivedVideoDataListener = (videoBuffer, size) -> {
         if (codecManager != null) codecManager.sendDataToDecoder(videoBuffer, size);
+        com.tri.djicontrol.media.LiveStreamRecorder rec = liveRecorder;
+        if (rec != null) rec.feed(videoBuffer, size);
     };
 
 
 
     private void showStorageDialog() {
-        Dialog dialog = new Dialog(this);
+        Dialog dialog = new Dialog(this, R.style.CfDialog);
         dialog.setContentView(R.layout.dialog_storage);
 
         if (dialog.getWindow() != null) {
-            dialog.getWindow().setBackgroundDrawableResource(
-                    android.R.color.transparent
-            );
-
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             dialog.getWindow().setLayout(
-                    (int) (getResources().getDisplayMetrics().widthPixels * 0.75),
-                    (int) (getResources().getDisplayMetrics().heightPixels * 0.85)
+                    (int) Math.min(dm.widthPixels * 0.82f, 860 * dm.density),
+                    (int) (dm.heightPixels * 0.9f)
             );
         }
 
@@ -1635,6 +2755,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         TextView tvSelectionCount = dialog.findViewById(R.id.tvSelectionCount);
         Button btnDownloadSelected = dialog.findViewById(R.id.btnDownloadSelected);
         Button btnDeleteSelected = dialog.findViewById(R.id.btnDeleteSelected);
+        Button btnFirebaseSelected = dialog.findViewById(R.id.btnFirebaseSelected);
 
         tvSpeedStats = dialog.findViewById(R.id.tvSpeedStats);
 
@@ -1647,7 +2768,52 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         gridStorage.setAdapter(adapter);
 
-        adapter.setOnSelectionListener(new StorageAdapter.OnSelectionListener() {
+        // --- Tab "Ảnh trên điện thoại": ảnh chụp khi quay (drone không hỗ trợ chụp lúc quay) ---
+        GridView gridLocal = dialog.findViewById(R.id.gridLocal);
+        TextView tvLocalEmpty = dialog.findViewById(R.id.tvLocalEmpty);
+        TextView tabDrone = dialog.findViewById(R.id.tabDrone);
+        TextView tabPhone = dialog.findViewById(R.id.tabPhone);
+        View tvSpeedView = dialog.findViewById(R.id.tvSpeedStats);
+        LocalPhotoAdapter localAdapter = new LocalPhotoAdapter(MainActivity.this);
+        gridLocal.setAdapter(localAdapter);
+        // true khi đang ở tab "Ảnh trên điện thoại" -> các nút TẢI VỀ / CLOUD / XÓA thao tác trên ảnh điện thoại
+        final boolean[] phoneTab = {false};
+
+        Runnable showDroneTab = () -> {
+            localAdapter.setSelectionMode(false);
+            phoneTab[0] = false;
+            tabDrone.setSelected(true);
+            tabPhone.setSelected(false);
+            gridStorage.setVisibility(View.VISIBLE);
+            tvSpeedView.setVisibility(View.VISIBLE);
+            gridLocal.setVisibility(View.GONE);
+            tvLocalEmpty.setVisibility(View.GONE);
+        };
+        Runnable showPhoneTab = () -> {
+            adapter.setSelectionMode(false);
+            phoneTab[0] = true;
+            tabPhone.setSelected(true);
+            tabDrone.setSelected(false);
+            gridStorage.setVisibility(View.GONE);
+            tvSpeedView.setVisibility(View.GONE);
+            boolean empty = localAdapter.reload() == 0;
+            gridLocal.setVisibility(empty ? View.GONE : View.VISIBLE);
+            tvLocalEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
+        };
+        tabDrone.setSelected(true); // mặc định mở tab thẻ nhớ drone
+        tabDrone.setOnClickListener(v -> showDroneTab.run());
+        tabPhone.setOnClickListener(v -> showPhoneTab.run());
+        localAdapter.registerDataSetObserver(new android.database.DataSetObserver() {
+            @Override
+            public void onChanged() {
+                if (gridStorage.getVisibility() == View.VISIBLE) return; // đang ở tab drone
+                boolean empty = localAdapter.getCount() == 0;
+                gridLocal.setVisibility(empty ? View.GONE : View.VISIBLE);
+                tvLocalEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
+            }
+        });
+
+        StorageAdapter.OnSelectionListener selectionListener = new StorageAdapter.OnSelectionListener() {
             @Override
             public void onSelectionChanged(int selectedCount) {
                 if (tvSelectionCount != null) {
@@ -1659,6 +2825,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 if (btnDeleteSelected != null) {
                     btnDeleteSelected.setText("XÓA (" + selectedCount + ")");
                 }
+                if (btnFirebaseSelected != null) {
+                    btnFirebaseSelected.setText("CLOUD (" + selectedCount + ")");
+                }
             }
 
             @Override
@@ -1668,14 +2837,23 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     layoutHeaderSelection.setVisibility(isSelectionMode ? View.VISIBLE : View.GONE);
                 }
             }
-        });
+        };
+        adapter.setOnSelectionListener(selectionListener);
+        localAdapter.setOnSelectionListener(selectionListener);
 
         if (btnCancelSelection != null) {
-            btnCancelSelection.setOnClickListener(v -> adapter.setSelectionMode(false));
+            btnCancelSelection.setOnClickListener(v -> {
+                if (phoneTab[0]) localAdapter.setSelectionMode(false);
+                else adapter.setSelectionMode(false);
+            });
         }
 
         if (btnDownloadSelected != null) {
             btnDownloadSelected.setOnClickListener(v -> {
+                if (phoneTab[0]) {
+                    localAdapter.saveSelectedToGallery();
+                    return;
+                }
                 Set<MediaFile> selected = adapter.getSelectedFiles();
                 if (selected.isEmpty()) {
                     Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để tải về!", Toast.LENGTH_SHORT).show();
@@ -1691,8 +2869,37 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             });
         }
 
+        if (btnFirebaseSelected != null) {
+            btnFirebaseSelected.setOnClickListener(v -> {
+                if (phoneTab[0]) {
+                    localAdapter.uploadSelectedToCloud();
+                    return;
+                }
+                Set<MediaFile> selected = adapter.getSelectedFiles();
+                if (selected.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để đẩy lên Cloud!", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                if (!com.tri.djicontrol.firebase.FirebaseHelper.isConfigured(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this, "Chưa cấu hình Cloud (CloudConfig.java)!", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                List<MediaFile> toUpload = new ArrayList<>(selected);
+                adapter.clearSelection();
+                adapter.setSelectionMode(false);
+
+                Toast.makeText(MainActivity.this, "Bắt đầu đẩy " + toUpload.size() + " file lên Cloud...", Toast.LENGTH_SHORT).show();
+                uploadBatchToFirebaseRecursive(toUpload, 0, 0);
+            });
+        }
+
         if (btnDeleteSelected != null) {
             btnDeleteSelected.setOnClickListener(v -> {
+                if (phoneTab[0]) {
+                    localAdapter.deleteSelected();
+                    return;
+                }
                 Set<MediaFile> selected = adapter.getSelectedFiles();
                 if (selected.isEmpty()) {
                     Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để xóa!", Toast.LENGTH_SHORT).show();
@@ -1709,41 +2916,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                 return;
                             }
 
-                            MediaManager mediaManager = currentAircraft.getCamera().getMediaManager();
+                            Camera delCamera = currentAircraft.getCamera();
+                            MediaManager mediaManager = delCamera.getMediaManager();
                             List<MediaFile> toDelete = new ArrayList<>(selected);
+
+                            adapter.clearSelection();
+                            adapter.setSelectionMode(false);
 
                             Toast.makeText(MainActivity.this, "Đang xóa " + toDelete.size() + " file khỏi máy bay...", Toast.LENGTH_SHORT).show();
 
-                            mediaManager.deleteFiles(toDelete, new CommonCallbacks.CompletionCallbackWithTwoParam<List<MediaFile>, DJICameraError>() {
-                                @Override
-                                public void onSuccess(List<MediaFile> failedFiles, DJICameraError error) {
-                                    runOnUiThread(() -> {
-                                        int failedCount = (failedFiles != null) ? failedFiles.size() : 0;
-                                        int successCount = toDelete.size() - failedCount;
-
-                                        for (MediaFile f : toDelete) {
-                                            if (failedFiles == null || !failedFiles.contains(f)) {
-                                                storageFiles.remove(f);
-                                            }
-                                        }
-
-                                        adapter.clearSelection();
-                                        adapter.setSelectionMode(false);
-                                        adapter.notifyDataSetChanged();
-
-                                        if (error == null && failedCount == 0) {
-                                            Toast.makeText(MainActivity.this, "Đã xóa thành công " + successCount + " file!", Toast.LENGTH_LONG).show();
-                                        } else {
-                                            Toast.makeText(MainActivity.this, "Đã xóa " + successCount + " file. Thất bại: " + failedCount + " file", Toast.LENGTH_LONG).show();
-                                        }
-                                    });
-                                }
-
-                                @Override
-                                public void onFailure(DJIError djiError) {
-                                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi xóa file: " + (djiError != null ? djiError.getDescription() : "Thất bại"), Toast.LENGTH_LONG).show());
-                                }
-                            });
+                            deleteFilesPermanently(delCamera, mediaManager, toDelete, storageFiles, adapter);
                         })
                         .setNegativeButton("HỦY", null)
                         .show();
@@ -1771,12 +2953,35 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         mode = SettingsDefinitions.CameraMode.RECORD_VIDEO;
                     }
 
-                    closeCamera.setMode(mode, null);
+                    boolean flat = false;
+                    try { flat = closeCamera.isFlatCameraModeSupported(); } catch (Exception ignored) {}
+                    if (flat) {
+                        closeCamera.exitPlayback(null);
+                    } else {
+                        closeCamera.setMode(mode, null);
+                    }
                 }
+            }
+
+            // Huỷ các thumbnail còn trong hàng đợi để không chiếm kết nối drone
+            dji.sdk.media.FetchMediaTaskScheduler scheduler = StorageAdapter.getScheduler();
+            if (scheduler != null) {
+                try { scheduler.removeAllTasks(); } catch (Exception ignored) {}
             }
 
             tvSpeedStats = null;
             dialog.dismiss();
+        });
+
+        // Đóng bằng nút Back / chạm ngoài cũng phải huỷ hàng đợi thumbnail,
+        // nếu không lần mở sau drone vẫn bận và quét ra 0 file
+        dialog.setOnDismissListener(d -> {
+            localAdapter.shutdown();
+            dji.sdk.media.FetchMediaTaskScheduler scheduler = StorageAdapter.getScheduler();
+            if (scheduler != null) {
+                try { scheduler.removeAllTasks(); } catch (Exception ignored) {}
+            }
+            tvSpeedStats = null;
         });
 
         dialog.show();
@@ -1821,6 +3026,213 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         };
 
         switchCameraToMediaDownloadMode(camera, startScan);
+    }
+
+    // =========================================================
+    // XÓA VĨNH VIỄN FILE TRÊN DRONE
+    // deleteFiles() đôi khi báo thành công nhưng drone không xóa thật (đang bận tải thumbnail,
+    // trộn file SD + bộ nhớ trong trong 1 lệnh...). Vì vậy: dừng thumbnail -> xóa theo từng
+    // vùng nhớ -> quét lại thẻ để kiểm tra -> file còn sót thì xóa lại -> hiển thị đúng thực tế.
+    // =========================================================
+    private void deleteFilesPermanently(Camera camera, MediaManager mediaManager, List<MediaFile> toDelete,
+                                        List<MediaFile> storageFiles, StorageAdapter adapter) {
+        dji.sdk.media.FetchMediaTaskScheduler scheduler = mediaManager.getScheduler();
+        if (scheduler != null) {
+            try { scheduler.removeAllTasks(); } catch (Exception ignored) {}
+        }
+
+        Set<String> targetKeys = new HashSet<>();
+        for (MediaFile f : toDelete) targetKeys.add(mediaKey(f));
+
+        deleteLog.setLength(0);
+        boolean flat = false, pageMode = false;
+        try { flat = camera.isFlatCameraModeSupported(); } catch (Exception ignored) {}
+        try { pageMode = mediaManager.isPlaybackPageSupported(); } catch (Exception ignored) {}
+        delLog("Camera: " + camera.getDisplayName()
+                + " | flatMode=" + flat + " | playbackPage=" + pageMode);
+        delLog("Chọn xóa: " + toDelete.size() + " file");
+
+        // Sau khi đổi chế độ camera, đối tượng MediaFile cũ có thể hết hiệu lực -> quét lại
+        // và xóa bằng đối tượng mới khớp tên + thời gian tạo (không khớp được thì dùng đối tượng cũ).
+        Runnable doDelete = () -> refreshAllStorage(mediaManager, () -> {
+            List<MediaFile> freshTargets = new ArrayList<>();
+            for (MediaFile f : collectMediaSnapshot(mediaManager)) {
+                if (targetKeys.contains(mediaKey(f))) freshTargets.add(f);
+            }
+            delLog("Khớp sau khi quét lại: " + freshTargets.size() + "/" + targetKeys.size());
+            List<MediaFile> list = freshTargets.isEmpty() ? toDelete : freshTargets;
+            deleteGroupedByStorage(mediaManager, list, false, () ->
+                    verifyAndRetryDelete(camera, mediaManager, targetKeys, storageFiles, adapter, 1));
+        });
+
+        if (flat) {
+            // Drone đời mới (Mini 2, Air 2, Air 2S...) không dùng MEDIA_DOWNLOAD: phải vào Playback mới xóa được trên thẻ
+            camera.enterPlayback(err -> {
+                delLog("enterPlayback: " + (err != null ? err.getDescription() : "OK"));
+                new Handler(Looper.getMainLooper()).postDelayed(doDelete, 800);
+            });
+        } else {
+            switchCameraToMediaDownloadMode(camera, doDelete);
+        }
+    }
+
+    // Nhật ký xóa hiện ngay trên màn hình (điện thoại cắm tay cầm nên không xem được Logcat)
+    private final StringBuilder deleteLog = new StringBuilder();
+
+    private void delLog(String msg) {
+        android.util.Log.d("DJI_STORAGE", msg);
+        synchronized (deleteLog) {
+            deleteLog.append("• ").append(msg).append("\n");
+        }
+    }
+
+    private void showDeleteLogDialog(String title) {
+        String text;
+        synchronized (deleteLog) { text = deleteLog.toString(); }
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextIsSelectable(true);
+        tv.setTextSize(12);
+        int pad = (int) (16 * getResources().getDisplayMetrics().density);
+        tv.setPadding(pad, pad / 2, pad, 0);
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(tv);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(sv)
+                .setPositiveButton("ĐÓNG", null)
+                .show();
+    }
+
+    private static String safeListState(MediaManager mm) {
+        try {
+            Object s = mm.getSDCardFileListState();
+            return s != null ? s.toString() : "?";
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    private static String mediaKey(MediaFile f) {
+        return f.getFileName() + "_" + f.getTimeCreated();
+    }
+
+    /** Gửi lệnh xóa riêng cho từng vùng nhớ (SD / bộ nhớ trong), lần lượt, rồi gọi onDone. */
+    private void deleteGroupedByStorage(MediaManager mediaManager, List<MediaFile> files, boolean direct, Runnable onDone) {
+        java.util.Map<String, List<MediaFile>> groups = new java.util.LinkedHashMap<>();
+        for (MediaFile f : files) {
+            SettingsDefinitions.StorageLocation loc = null;
+            try { loc = f.getStorageLocation(); } catch (Exception ignored) {}
+            String k = loc == null ? "UNKNOWN" : loc.name();
+            List<MediaFile> g = groups.get(k);
+            if (g == null) { g = new ArrayList<>(); groups.put(k, g); }
+            g.add(f);
+        }
+        deleteGroupAt(mediaManager, new ArrayList<>(groups.values()), 0, direct, onDone);
+    }
+
+    private void deleteGroupAt(MediaManager mediaManager, List<List<MediaFile>> groups, int index, boolean direct, Runnable onDone) {
+        if (index >= groups.size()) {
+            // Cho drone ghi xong thay đổi lên thẻ trước khi quét lại
+            new Handler(Looper.getMainLooper()).postDelayed(onDone, 1000);
+            return;
+        }
+        Runnable next = () -> new Handler(Looper.getMainLooper()).postDelayed(
+                () -> deleteGroupAt(mediaManager, groups, index + 1, direct, onDone), 500);
+        CommonCallbacks.CompletionCallbackWithTwoParam<List<MediaFile>, DJICameraError> cb =
+                new CommonCallbacks.CompletionCallbackWithTwoParam<List<MediaFile>, DJICameraError>() {
+                @Override
+                public void onSuccess(List<MediaFile> failedFiles, DJICameraError error) {
+                    delLog((direct ? "deleteDirectly" : "deleteFiles") + " nhóm " + index + ": lỗi=" + (error != null ? error.getDescription() : "không")
+                            + ", thất bại=" + (failedFiles != null ? failedFiles.size() : 0));
+                    next.run();
+                }
+
+                @Override
+                public void onFailure(DJIError djiError) {
+                    delLog((direct ? "deleteDirectly" : "deleteFiles") + " nhóm " + index + " lỗi: " + (djiError != null ? djiError.getDescription() : "?"));
+                    next.run();
+                }
+            };
+        try {
+            if (direct) mediaManager.deleteDirectly(groups.get(index), cb);
+            else mediaManager.deleteFiles(groups.get(index), cb);
+        } catch (Exception e) {
+            delLog("Lệnh xóa ném lỗi: " + e);
+            next.run();
+        }
+    }
+
+    /** Quét lại thẻ nhớ drone, xem file nào còn tồn tại thật; còn thì xóa lại (tối đa 3 lần). */
+    private void verifyAndRetryDelete(Camera camera, MediaManager mediaManager, Set<String> targetKeys,
+                                      List<MediaFile> storageFiles, StorageAdapter adapter, int attempt) {
+        refreshAllStorage(mediaManager, () -> {
+            List<MediaFile> remaining = new ArrayList<>();
+            for (MediaFile f : collectMediaSnapshot(mediaManager)) {
+                if (targetKeys.contains(mediaKey(f))) remaining.add(f);
+            }
+            int total = targetKeys.size();
+            delLog("Kiểm tra lần " + attempt + ": còn " + remaining.size() + "/" + total + " file trên drone"
+                    + " (SD: " + safeListState(mediaManager) + ")");
+
+            if (!remaining.isEmpty() && attempt < 3) {
+                delLog("Còn " + remaining.size() + " file chưa xóa, thử lại lần " + (attempt + 1));
+                // Dùng đối tượng MediaFile mới từ snapshot vừa quét (đối tượng cũ có thể đã hết hiệu lực).
+                // Lần thử lại dùng deleteDirectly: xóa thẳng trên thẻ, không phụ thuộc danh sách tạm của SDK.
+                deleteGroupedByStorage(mediaManager, remaining, true, () ->
+                        verifyAndRetryDelete(camera, mediaManager, targetKeys, storageFiles, adapter, attempt + 1));
+                return;
+            }
+
+            int deleted = total - remaining.size();
+            // Hiển thị đúng danh sách thực tế trên drone
+            List<MediaFile> fresh = collectMediaSnapshot(mediaManager);
+            Collections.sort(fresh, (f1, f2) -> Long.compare(f2.getTimeCreated(), f1.getTimeCreated()));
+            runOnUiThread(() -> {
+                storageFiles.clear();
+                storageFiles.addAll(fresh);
+                adapter.notifyDataSetChanged();
+                if (remaining.isEmpty()) {
+                    showDeleteLogDialog("Đã xóa " + deleted + "/" + total + " file khỏi drone");
+                } else {
+                    showDeleteLogDialog("Drone không cho xóa " + remaining.size() + "/" + total + " file");
+                }
+            });
+        });
+    }
+
+    /** Làm mới danh sách file của cả thẻ SD và bộ nhớ trong, xong thì gọi onDone trên main thread. */
+    private void refreshAllStorage(MediaManager mediaManager, Runnable onDone) {
+        // Bắt buộc đọc lại từ drone (force = true). Refresh thường có thể trả danh sách cache của SDK,
+        // nên trước đây tưởng đã xóa nhưng file vẫn còn trên thẻ -> kết nối lại thì hiện lại.
+        try {
+            mediaManager.refreshFileList(true, err -> {
+                delLog("Force refresh: " + (err != null ? err.getDescription() : "OK"));
+                refreshByStorageLocation(mediaManager, onDone);
+            });
+        } catch (Exception e) {
+            refreshByStorageLocation(mediaManager, onDone);
+        }
+    }
+
+    private void refreshByStorageLocation(MediaManager mediaManager, Runnable onDone) {
+        Handler main = new Handler(Looper.getMainLooper());
+        try {
+            mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, sdErr -> {
+                try {
+                    mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.INTERNAL_STORAGE,
+                            intErr -> main.post(onDone));
+                } catch (Exception e) {
+                    main.post(onDone);
+                }
+            });
+        } catch (Exception e) {
+            try {
+                mediaManager.refreshFileList(err -> main.post(onDone));
+            } catch (Exception e2) {
+                main.post(onDone);
+            }
+        }
     }
 
     private void retryGetMediaManager(Camera camera, List<MediaFile> storageFiles, StorageAdapter adapter, int attempt) {
@@ -1898,56 +3310,101 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         final boolean[] isFinished = {false};
         final Handler handler = new Handler(Looper.getMainLooper());
+        // Ghi lại lỗi drone trả về để hiện cho người dùng thay vì chỉ báo "0 file"
+        final StringBuilder scanErrors = new StringBuilder();
 
+        // Huỷ hàng đợi thumbnail cũ: drone đang bận tải thumbnail sẽ từ chối refresh danh sách file
+        dji.sdk.media.FetchMediaTaskScheduler oldScheduler = mediaManager.getScheduler();
+        if (oldScheduler != null) {
+            try { oldScheduler.removeAllTasks(); } catch (Exception ignored) {}
+        }
+
+        // Kết quả quét thật sự (khi refresh xong) - luôn cập nhật lưới, kể cả khi đã hết timeout
         final Runnable finishAndPopulate = () -> {
             if (!isFinished[0]) {
                 isFinished[0] = true;
-
-                Set<String> fileNames = new HashSet<>();
-                List<MediaFile> allFiles = new ArrayList<>();
-
-                // 1. Quét Thẻ SD (SDCARD)
-                List<MediaFile> sdList = mediaManager.getSDCardFileListSnapshot();
-                if (sdList != null) {
-                    for (MediaFile f : sdList) {
-                        if (f != null && f.getFileName() != null && !f.getFileName().isEmpty() && fileNames.add(f.getFileName())) {
-                            allFiles.add(f);
-                        }
-                    }
+                handler.removeCallbacksAndMessages(null);
+                List<MediaFile> result = collectMediaSnapshot(mediaManager);
+                finalizeMediaFiles(result, storageFiles, adapter, onComplete);
+                if (result.isEmpty() && scanErrors.length() > 0) {
+                    Toast.makeText(MainActivity.this, "Lỗi quét từ drone:\n" + scanErrors, Toast.LENGTH_LONG).show();
                 }
-
-                // 2. Quét Bộ nhớ trong (INTERNAL_STORAGE)
-                List<MediaFile> intList = mediaManager.getInternalStorageFileListSnapshot();
-                if (intList != null) {
-                    for (MediaFile f : intList) {
-                        if (f != null && f.getFileName() != null && !f.getFileName().isEmpty() && fileNames.add(f.getFileName())) {
-                            allFiles.add(f);
-                        }
-                    }
-                }
-
-                finalizeMediaFiles(allFiles, storageFiles, adapter, onComplete);
+                android.util.Log.d("DJI_STORAGE", "Quét xong: " + result.size() + " file. Lỗi: " + scanErrors);
             }
         };
 
-        // Safety timeout tối đa 8 giây
-        handler.postDelayed(finishAndPopulate, 8000);
+        // Thẻ nhớ nhiều file có thể quét lâu: sau 8 giây hiện tạm những gì đã có,
+        // nhưng KHÔNG chốt kết quả - callback refresh về sau vẫn cập nhật lại danh sách.
+        handler.postDelayed(() -> {
+            if (isFinished[0]) return;
+            List<MediaFile> partial = collectMediaSnapshot(mediaManager);
+            if (!partial.isEmpty()) {
+                Collections.sort(partial, (f1, f2) -> Long.compare(f2.getTimeCreated(), f1.getTimeCreated()));
+                storageFiles.clear();
+                storageFiles.addAll(partial);
+                adapter.notifyDataSetChanged();
+            }
+            Toast.makeText(MainActivity.this, "Drone vẫn đang quét thẻ nhớ, vui lòng đợi...", Toast.LENGTH_SHORT).show();
+        }, 8000);
+        // Chốt cứng sau 30 giây nếu drone không trả callback
+        handler.postDelayed(finishAndPopulate, 30000);
 
-        // Bước 1: Quét thẻ nhớ SD trước
-        mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, sdErr -> {
-            // Bước 2: Quét tiếp bộ nhớ trong (INTERNAL_STORAGE) bất kể SDCARD lỗi hay không
-            mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.INTERNAL_STORAGE, intErr -> {
-                // Nếu ít nhất 1 vị trí quét thành công hoặc đã lấy được dữ liệu snapshot
-                if (sdErr == null || intErr == null || getTotalMediaCount(mediaManager) > 0) {
-                    handler.post(finishAndPopulate);
-                } else {
-                    // Dự phòng cho drone đời cũ không hỗ trợ refreshFileListOfStorageLocation
-                    mediaManager.refreshFileList(genErr -> {
-                        handler.postDelayed(finishAndPopulate, 1500);
+        // Dự phòng: refresh kiểu cũ (drone đời cũ không hỗ trợ refreshFileListOfStorageLocation)
+        final Runnable legacyRefresh = () -> {
+            try {
+                mediaManager.refreshFileList(genErr -> {
+                    if (genErr != null) scanErrors.append("• Chung: ").append(genErr.getDescription()).append("\n");
+                    handler.postDelayed(finishAndPopulate, 1500);
+                });
+            } catch (Exception e) {
+                scanErrors.append("• Chung: ").append(e.getMessage()).append("\n");
+                handler.post(finishAndPopulate);
+            }
+        };
+
+        try {
+            // Bước 1: Quét thẻ nhớ SD trước
+            mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.SDCARD, sdErr -> {
+                if (sdErr != null) scanErrors.append("• Thẻ SD: ").append(sdErr.getDescription()).append("\n");
+                // Bước 2: Quét tiếp bộ nhớ trong (INTERNAL_STORAGE) bất kể SDCARD lỗi hay không
+                try {
+                    mediaManager.refreshFileListOfStorageLocation(SettingsDefinitions.StorageLocation.INTERNAL_STORAGE, intErr -> {
+                        if (intErr != null) scanErrors.append("• Bộ nhớ trong: ").append(intErr.getDescription()).append("\n");
+                        if (getTotalMediaCount(mediaManager) > 0) {
+                            handler.post(finishAndPopulate);
+                        } else {
+                            // Không có file nào (có thể do lỗi "bận") -> thử thêm 1 lần kiểu cũ
+                            legacyRefresh.run();
+                        }
                     });
+                } catch (Exception e) {
+                    if (getTotalMediaCount(mediaManager) > 0) handler.post(finishAndPopulate);
+                    else legacyRefresh.run();
                 }
             });
-        });
+        } catch (Exception e) {
+            // Firmware không hỗ trợ quét theo vị trí lưu trữ
+            legacyRefresh.run();
+        }
+    }
+
+    // Gộp danh sách file của thẻ SD và bộ nhớ trong (bỏ trùng theo tên + thời gian tạo)
+    private List<MediaFile> collectMediaSnapshot(MediaManager mediaManager) {
+        Set<String> keys = new HashSet<>();
+        List<MediaFile> allFiles = new ArrayList<>();
+        List<List<MediaFile>> sources = new ArrayList<>();
+        try { sources.add(mediaManager.getSDCardFileListSnapshot()); } catch (Exception ignored) {}
+        try { sources.add(mediaManager.getInternalStorageFileListSnapshot()); } catch (Exception ignored) {}
+        for (List<MediaFile> list : sources) {
+            if (list == null) continue;
+            for (MediaFile f : list) {
+                if (f != null && f.getFileName() != null && !f.getFileName().isEmpty()
+                        && keys.add(f.getFileName() + "_" + f.getTimeCreated())) {
+                    allFiles.add(f);
+                }
+            }
+        }
+        return allFiles;
     }
 
     private int getTotalMediaCount(MediaManager mediaManager) {
@@ -2008,6 +3465,20 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         });
     }
 
+    /** Dự phòng khi camera drone không cho chụp trong lúc quay: lưu khung hình live view vào điện thoại. */
+    private void captureFrameFromLiveView(String hwError) {
+        if (videoSurface == null || !videoSurface.isAvailable()) {
+            Toast.makeText(this, "Không chụp được: " + hwError, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Bitmap currentFrame = videoSurface.getBitmap();
+        if (currentFrame == null) {
+            Toast.makeText(this, "Không lấy được khung hình video!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        saveLiveFramePhoto(currentFrame);
+    }
+
     private void saveLiveFramePhoto(Bitmap bitmap) {
         if (bitmap == null) return;
         new Thread(() -> {
@@ -2063,8 +3534,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     }
                     photoCount++;
                     runOnUiThread(() -> {
-                        tvPhotoCount.setText("Ảnh đã chụp: " + photoCount + " tấm");
-                        Toast.makeText(MainActivity.this, "Đã lưu ảnh chụp từ video vào Bộ sưu tập!", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(MainActivity.this, "Đã lưu ảnh vào điện thoại. Xem ở Lưu trữ > tab ẢNH TRÊN ĐIỆN THOẠI", Toast.LENGTH_SHORT).show();
                     });
                 } else {
                     runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không thể lưu ảnh vào bộ nhớ!", Toast.LENGTH_SHORT).show());

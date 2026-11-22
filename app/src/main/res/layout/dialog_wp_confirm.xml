@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hộp thoại xác nhận trước khi bay quét (WP). Thiết kế cho màn hình ngang: 2 cột. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_cf_dialog"
+    android:orientation="vertical"
+    android:paddingStart="18dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="18dp"
+    android:paddingBottom="14dp">
+
+    <!-- ===== TIÊU ĐỀ ===== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_cf_icon"
+            android:gravity="center"
+            android:text="✈"
+            android:textColor="#69F0AE"
+            android:textSize="20sp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bắt đầu bay quét?"
+                android:textColor="#FFFFFF"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="Kiểm tra lại thông tin trước khi drone tự động bay"
+                android:textColor="#9AA0A6"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvCfMode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_cf_chip"
+            android:paddingStart="12dp"
+            android:paddingTop="5dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="5dp"
+            android:text="📷  CHỤP ẢNH"
+            android:textColor="#69F0AE"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="10dp"
+        android:background="#1FFFFFFF" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fadeScrollbars="true"
+        android:scrollbarSize="2dp">
+
+        <!-- ===== THÂN: 2 CỘT ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <!-- Cột trái: thông số -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.2"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:text="THÔNG SỐ CHUYẾN BAY" />
+
+                <LinearLayout
+                    android:id="@+id/cfStatsRow1"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+
+                <LinearLayout
+                    android:id="@+id/cfStatsRow2"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    android:id="@+id/tvCfSpeedNote"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="ⓘ Tốc độ đã giảm để camera kịp chụp"
+                    android:textColor="#9AA0A6"
+                    android:textSize="10sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tvCfWarning"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:background="@drawable/bg_cf_warning"
+                    android:padding="8dp"
+                    android:textColor="#FFD54F"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <!-- Cột phải: quy trình + kiểm tra an toàn -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:text="QUY TRÌNH TỰ ĐỘNG" />
+
+                <LinearLayout
+                    android:id="@+id/cfStepsContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:layout_marginTop="10dp"
+                    android:text="KIỂM TRA AN TOÀN" />
+
+                <CheckBox
+                    android:id="@+id/cbCfObstacle"
+                    style="@style/CfCheck"
+                    android:text="Khu vực bay không có vật cản" />
+
+                <CheckBox
+                    android:id="@+id/cbCfBattery"
+                    style="@style/CfCheck"
+                    android:text="Pin drone và tay cầm đã đầy" />
+
+                <CheckBox
+                    android:id="@+id/cbCfHome"
+                    style="@style/CfCheck"
+                    android:text="Điểm Home đã được ghi nhận" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- ===== CHÂN: GHI CHÚ + NÚT ===== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvCfHint"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Có thể bấm DỪNG hoặc RTH bất cứ lúc nào"
+            android:textColor="#9AA0A6"
+            android:textSize="10sp" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCfCancel"
+            android:layout_width="96dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_cf_btn_cancel"
+            android:minHeight="0dp"
+            android:stateListAnimator="@null"
+            android:text="HỦY"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnCfFly"
+            android:layout_width="140dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/bg_cf_btn_fly"
+            android:enabled="false"
+            android:minHeight="0dp"
+            android:stateListAnimator="@null"
+            android:text="✈  BAY NGAY"
+            android:textColor="@color/txt_cf_btn_fly"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+</LinearLayout>

@@ -13,67 +13,104 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Thanh trạng thái trên: kết nối (trái) + các ô GPS / Pin / RC / Thẻ / Home (phải) -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="40dp"
+        android:layout_height="48dp"
         android:layout_alignParentTop="true"
-        android:background="#00000000"
+        android:background="@drawable/bg_topbar_gradient"
         android:elevation="12dp"
         android:gravity="center_vertical"
         android:orientation="horizontal"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp">
+        android:outlineProvider="none"
+        android:paddingStart="14dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="6dp">
 
+        <View
+            android:id="@+id/statusDot"
+            android:layout_width="9dp"
+            android:layout_height="9dp"
+            android:background="@drawable/ic_status_dot"
+            android:backgroundTint="#FF5252" />
 
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginStart="10dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:gravity="center_vertical"
             android:orientation="vertical">
 
             <TextView
                 android:id="@+id/tvStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:ellipsize="end"
                 android:maxLines="1"
-                android:text="Máy bay trên mặt đất - Đang kết nối..."
+                android:shadowColor="#CC000000"
+                android:shadowRadius="4"
+                android:text="Đang kết nối drone..."
                 android:textColor="#FFFFFF"
                 android:textSize="12sp"
                 android:textStyle="bold" />
 
+            <!-- Giữ lại cho code cũ; thông tin hiện ở các ô bên phải -->
             <TextView
                 android:id="@+id/tvGpsAndSdStatus"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:text="GPS: 0 | Pin: --% | RC: --% | Tìm drone..."
-                android:textColor="#E8FFF4"
-                android:textSize="9sp" />
+                android:visibility="gone" />
         </LinearLayout>
 
-        <Button
+        <TextView
+            android:id="@+id/tvChipGps"
+            style="@style/StatusChip"
+            android:text="GPS --" />
+
+        <TextView
+            android:id="@+id/tvChipBattery"
+            style="@style/StatusChip"
+            android:text="PIN --%" />
+
+        <TextView
+            android:id="@+id/tvChipRc"
+            style="@style/StatusChip"
+            android:text="RC --%" />
+
+        <TextView
+            android:id="@+id/tvChipSd"
+            style="@style/StatusChip"
+            android:text="THẺ --" />
+
+        <TextView
+            android:id="@+id/tvChipHome"
+            style="@style/StatusChip"
+            android:text="HOME" />
+
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnCameraMenu"
-            android:layout_width="40dp"
-            android:layout_height="match_parent"
-            android:background="?android:attr/selectableItemBackground"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_wp_close"
             android:gravity="center"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            android:stateListAnimator="@null"
             android:text="⚙"
-            android:textColor="#FFC107"
-            android:textSize="22sp" />
+            android:textColor="#FFD54F"
+            android:textSize="17sp" />
     </LinearLayout>
 
     <!-- Tâm ngắm giữa camera -->
-    <TextView
-        android:layout_width="60dp"
-        android:layout_height="60dp"
+    <ImageView
+        android:layout_width="56dp"
+        android:layout_height="56dp"
         android:layout_centerInParent="true"
-        android:gravity="center"
-        android:text="+"
-        android:textColor="#DDFFFFFF"
-        android:textSize="36sp" />
+        android:importantForAccessibility="no"
+        android:src="@drawable/ic_crosshair" />
     <!-- THỜI GIAN QUAY VIDEO -->
     <TextView
         android:id="@+id/tvVideoTimer"
@@ -82,16 +119,20 @@
         android:layout_alignParentTop="true"
         android:layout_centerHorizontal="true"
         android:layout_marginTop="55dp"
+        android:background="@drawable/bg_rec_timer"
+        android:drawableStart="@drawable/ic_rec_dot"
+        android:drawablePadding="8dp"
+        android:fontFeatureSettings="tnum"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="4dp"
         android:text="00:00"
         android:textColor="#FFFFFF"
-        android:textSize="22sp"
+        android:textSize="18sp"
         android:textStyle="bold"
-        android:visibility="gone"
-        android:background="#66000000"
-        android:paddingLeft="12dp"
-        android:paddingRight="12dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp" />
+        android:visibility="gone" />
     <!-- Thông tin nhiệm vụ phía trên bên phải -->
     <LinearLayout
         android:id="@+id/taskInformation"
@@ -137,10 +178,11 @@
             android:orientation="horizontal">
 
             <TextView
+                android:id="@+id/tvCaptureLabel"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Số ảnh đã thu thập"
+                android:text="Dữ liệu bay quét"
                 android:textColor="#FFFFFF"
                 android:textSize="10sp" />
 
@@ -148,7 +190,7 @@
                 android:id="@+id/tvPhotoCount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="0 tấm"
+                android:text="Chưa bay"
                 android:textColor="#69F0AE"
                 android:textSize="12sp"
                 android:textStyle="bold" />
@@ -220,41 +262,131 @@
 
     </FrameLayout>
 
-    <!-- Thông số bay dưới giữa -->
+    <!-- Thông số bay dưới giữa: độ cao / tốc độ ngang / tốc độ đứng / cách Home -->
     <LinearLayout
         android:id="@+id/bottomTelemetry"
-        android:layout_width="280dp"
-        android:layout_height="30dp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:layout_centerHorizontal="true"
         android:layout_marginBottom="8dp"
-        android:background="#A6000000"
+        android:background="@drawable/bg_tele_card"
         android:elevation="10dp"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="4dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="8dp"
+        android:paddingTop="4dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="4dp">
 
+        <LinearLayout style="@style/TeleBlock">
+            <TextView android:id="@+id/tvTeleAlt" style="@style/TeleValue" android:text="0.0 m" />
+            <TextView style="@style/TeleLabel" android:text="ĐỘ CAO" />
+        </LinearLayout>
+
+        <View style="@style/TeleDivider" />
+
+        <LinearLayout style="@style/TeleBlock">
+            <TextView android:id="@+id/tvTeleHSpeed" style="@style/TeleValue" android:text="0.0 m/s" />
+            <TextView style="@style/TeleLabel" android:text="TỐC ĐỘ" />
+        </LinearLayout>
+
+        <View style="@style/TeleDivider" />
+
+        <LinearLayout style="@style/TeleBlock">
+            <TextView android:id="@+id/tvTeleVSpeed" style="@style/TeleValue" android:text="0.0 m/s" />
+            <TextView style="@style/TeleLabel" android:text="LÊN / XUỐNG" />
+        </LinearLayout>
+
+        <View style="@style/TeleDivider" />
+
+        <LinearLayout style="@style/TeleBlock">
+            <TextView android:id="@+id/tvTeleDist" style="@style/TeleValue" android:text="0 m" />
+            <TextView android:id="@+id/tvTeleDistLabel" style="@style/TeleLabel" android:text="CÁCH HOME" />
+        </LinearLayout>
+
+        <!-- Tốc độ mạng DL/UL (chỉ hiện khi có) -->
+        <TextView
+            android:id="@+id/tvTeleNet"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:fontFeatureSettings="tnum"
+            android:maxLines="2"
+            android:textColor="#69F0AE"
+            android:textSize="9sp"
+            android:visibility="gone" />
+
+        <!-- Giữ lại cho code cũ -->
         <TextView
             android:id="@+id/tvTelemetry"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:gravity="center"
-            android:text="Cao: 0.0m | Tốc độ: 0.0m/s | Cách đích: 0.0m"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold" />
+            android:visibility="gone" />
     </LinearLayout>
 
-    <!-- Gimbal bên phải -->
-    <SeekBar
-        android:id="@+id/seekBarGimbal"
-        android:layout_width="150dp"
+    <!-- Góc camera (gimbal): thanh dọc, kéo lên = ngẩng camera, kéo xuống = nhìn xuống.
+         Chạm vào số độ để chuyển nhanh 0° <-> -90° (nhìn thẳng xuống ruộng). -->
+    <LinearLayout
+        android:id="@+id/gimbalPanel"
+        android:layout_width="32dp"
         android:layout_height="wrap_content"
         android:layout_alignParentEnd="true"
         android:layout_centerVertical="true"
-        android:layout_marginEnd="220dp"
-        android:max="180"
-        android:progress="90" />
+        android:layout_marginEnd="194dp"
+        android:background="@drawable/bg_gimbal_card"
+        android:clipChildren="false"
+        android:elevation="8dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingTop="5dp"
+        android:paddingBottom="5dp">
+
+        <TextView
+            android:id="@+id/tvGimbalAngle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:fontFeatureSettings="tnum"
+            android:gravity="center"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:text="0°"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <TextView
+            style="@style/GimbalTick"
+            android:layout_marginTop="2dp"
+            android:text="+20" />
+
+        <FrameLayout
+            android:layout_width="32dp"
+            android:layout_height="104dp"
+            android:clipChildren="false">
+
+            <!-- SeekBar ngang xoay 270° thành thanh dọc (giá trị tăng khi kéo lên) -->
+            <SeekBar
+                android:id="@+id/seekBarGimbal"
+                android:layout_width="104dp"
+                android:layout_height="26dp"
+                android:layout_gravity="center"
+                android:background="@null"
+                android:max="110"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:progress="90"
+                android:progressDrawable="@drawable/bg_gimbal_track"
+                android:rotation="270"
+                android:splitTrack="false"
+                android:thumb="@drawable/bg_gimbal_thumb" />
+        </FrameLayout>
+
+        <TextView
+            style="@style/GimbalTick"
+            android:text="-90" />
+    </LinearLayout>
 
     <!-- ===================================================== -->
     <!-- CAMERA CONTROL -->
@@ -267,7 +399,8 @@
         android:layout_alignParentEnd="true"
         android:orientation="horizontal"
         android:gravity="center"
-        android:background="#CC000000"
+        android:background="@drawable/bg_camera_panel"
+        android:outlineProvider="none"
         android:elevation="20dp">
 
         <!-- CHỌN CHẾ ĐỘ -->
@@ -278,41 +411,37 @@
             android:orientation="vertical">
 
             <!-- THANH CHỌN ẢNH / VIDEO -->
+            <!-- Công tắc dọc: khối vàng trượt lên (VIDEO) / xuống (ẢNH). Chạm hoặc vuốt để đổi. -->
             <FrameLayout
                 android:id="@+id/cameraModePicker"
-                android:layout_width="100dp"
-                android:layout_height="150dp"
-                android:layout_gravity="center_vertical"
-                android:clipChildren="false">
+                android:layout_width="56dp"
+                android:layout_height="112dp"
+                android:layout_gravity="center"
+                android:background="@drawable/bg_mode_track"
+                android:padding="4dp">
+
+                <View
+                    android:id="@+id/cameraModeThumb"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_gravity="top"
+                    android:background="@drawable/bg_mode_thumb"
+                    android:elevation="2dp"
+                    android:translationY="52dp" />
 
                 <TextView
                     android:id="@+id/tvCameraVideo"
-                    android:layout_width="match_parent"
-                    android:layout_height="40dp"
-                    android:layout_gravity="center_horizontal|top"
-                    android:layout_marginTop="25dp"
-                    android:gravity="center"
-                    android:text="Video"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp"
-                    android:alpha="0.6"
-                    android:clickable="false"
-                    android:focusable="false" />
+                    style="@style/CameraModeLabel"
+                    android:layout_gravity="top"
+                    android:drawableTop="@drawable/ic_mode_video"
+                    android:text="VIDEO" />
 
                 <TextView
                     android:id="@+id/tvCameraPhoto"
-                    android:layout_width="match_parent"
-                    android:layout_height="40dp"
-                    android:layout_gravity="center_horizontal|bottom"
-                    android:layout_marginBottom="25dp"
-                    android:gravity="center"
-                    android:text="Ảnh"
-                    android:textColor="#FFFF00"
-                    android:textSize="20sp"
-                    android:textStyle="bold"
-                    android:clickable="false"
-                    android:focusable="false" />
-
+                    style="@style/CameraModeLabel"
+                    android:layout_gravity="bottom"
+                    android:drawableTop="@drawable/ic_mode_photo"
+                    android:text="ẢNH" />
             </FrameLayout>
         </LinearLayout>
 
@@ -358,20 +487,18 @@
             </FrameLayout>
 
             <!-- NÚT LƯU TRỮ -->
-            <Button
+            <ImageButton
                 android:id="@+id/btnViewPhotos"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
                 android:layout_marginTop="25dp"
                 android:translationY="40dp"
-                android:backgroundTint="@android:color/transparent"
-                android:text="□"
-                android:textColor="@android:color/white"
-                android:textSize="26sp"
-                android:textStyle="bold"
-                android:padding="0dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp" />
+                android:background="@drawable/bg_storage_btn"
+                android:contentDescription="Mở kho lưu trữ"
+                android:elevation="4dp"
+                android:padding="12dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_storage_gallery" />
 
         </LinearLayout>
     </LinearLayout>

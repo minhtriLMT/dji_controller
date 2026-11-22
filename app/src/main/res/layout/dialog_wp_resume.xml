@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hộp thoại BAY TIẾP nhiệm vụ đang dở (sau khi thay pin) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_cf_dialog"
+    android:orientation="vertical"
+    android:paddingStart="18dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="18dp"
+    android:paddingBottom="14dp">
+
+    <!-- Tiêu đề + % đã quét -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_cf_icon"
+            android:gravity="center"
+            android:text="↻"
+            android:textColor="#69F0AE"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Bay tiếp nhiệm vụ đang dở?"
+                android:textColor="#FFFFFF"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvResumeMission"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textColor="#9AA0A6"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvResumePercent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0%"
+            android:textColor="#69F0AE"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/pbResume"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="6dp"
+        android:layout_marginTop="12dp"
+        android:max="100"
+        android:progressBackgroundTint="#33FFFFFF"
+        android:progressTint="#69F0AE" />
+
+    <TextView
+        android:id="@+id/tvResumeReason"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:textColor="#9AA0A6"
+        android:textSize="11sp" />
+
+    <LinearLayout
+        android:id="@+id/resumeStats"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="horizontal" />
+
+    <TextView
+        android:id="@+id/tvResumeHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:textColor="#E8EAED"
+        android:textSize="11sp" />
+
+    <!-- Nút -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="horizontal">
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnResumeDiscard"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:background="@drawable/bg_wp_btn_ghost"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Hủy nhiệm vụ"
+            android:textColor="#FF8A80" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnResumeLater"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:background="@drawable/bg_cf_btn_cancel"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="Để sau"
+            android:textColor="#FFFFFF" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnResumeGo"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/bg_cf_btn_fly"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:text="✈  Bay tiếp"
+            android:textColor="@color/txt_cf_btn_fly" />
+    </LinearLayout>
+</LinearLayout>

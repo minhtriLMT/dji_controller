@@ -1,126 +1,233 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Hộp thoại LƯU TRỮ ảnh / video (thẻ nhớ drone + điện thoại) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@drawable/bg_cf_dialog"
     android:orientation="vertical"
-    android:background="#20242A"
-    android:padding="8dp">
+    android:paddingStart="14dp"
+    android:paddingTop="12dp"
+    android:paddingEnd="14dp"
+    android:paddingBottom="10dp">
 
-    <!-- TIÊU ĐỀ THƯỜNG -->
+    <!-- ===== TIÊU ĐỀ THƯỜNG ===== -->
     <LinearLayout
         android:id="@+id/layoutHeaderNormal"
         android:layout_width="match_parent"
-        android:layout_height="40dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:layout_height="42dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-        <TextView
+        <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:gravity="center_vertical"
-            android:text="LƯU TRỮ"
-            android:textColor="#FFFFFF"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:orientation="vertical">
 
-        <Button
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Lưu trữ"
+                android:textColor="#FFFFFF"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Nhấn để xem • Nhấn giữ để chọn nhiều"
+                android:textColor="#9AA0A6"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnCloseStorage"
-            android:layout_width="45dp"
+            android:layout_width="34dp"
             android:layout_height="34dp"
+            android:background="@drawable/bg_wp_close"
             android:minWidth="0dp"
             android:minHeight="0dp"
             android:padding="0dp"
-            android:text="X"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp" />
-
+            android:stateListAnimator="@null"
+            android:text="✕"
+            android:textColor="#E8EAED"
+            android:textSize="14sp" />
     </LinearLayout>
 
-    <!-- HEADER CHẾ ĐỘ CHỌN NHIỀU (SELECTION MODE) -->
+    <!-- ===== THANH CHỌN NHIỀU ===== -->
     <LinearLayout
         android:id="@+id/layoutHeaderSelection"
         android:layout_width="match_parent"
-        android:layout_height="40dp"
-        android:orientation="horizontal"
+        android:layout_height="42dp"
         android:gravity="center_vertical"
+        android:orientation="horizontal"
         android:visibility="gone">
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnCancelSelection"
+            style="@style/WpButton"
             android:layout_width="wrap_content"
-            android:layout_height="34dp"
-            android:minWidth="0dp"
-            android:paddingLeft="12dp"
-            android:paddingRight="12dp"
-            android:text="HỦY"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp" />
+            android:layout_height="36dp"
+            android:background="@drawable/bg_wp_btn_ghost"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Hủy"
+            android:textColor="@color/txt_wp_ghost" />
 
         <TextView
             android:id="@+id/tvSelectionCount"
             android:layout_width="0dp"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
             android:layout_weight="1"
-            android:gravity="center"
             android:text="Đã chọn: 0"
-            android:textColor="#FFEB3B"
-            android:textSize="14sp"
+            android:textColor="#69F0AE"
+            android:textSize="15sp"
             android:textStyle="bold" />
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnDownloadSelected"
+            style="@style/WpButton"
             android:layout_width="wrap_content"
-            android:layout_height="34dp"
-            android:minWidth="0dp"
-            android:layout_marginEnd="6dp"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
-            android:text="TẢI VỀ"
-            android:backgroundTint="#4CAF50"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
+            android:layout_height="36dp"
+            android:background="@drawable/bg_st_btn_download"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Tải về"
+            android:textColor="#0F2A1C" />
 
-        <Button
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnFirebaseSelected"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_st_btn_cloud"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Cloud"
+            android:textColor="#2B1A00" />
+
+        <androidx.appcompat.widget.AppCompatButton
             android:id="@+id/btnDeleteSelected"
+            style="@style/WpButton"
             android:layout_width="wrap_content"
-            android:layout_height="34dp"
-            android:minWidth="0dp"
-            android:paddingLeft="10dp"
-            android:paddingRight="10dp"
-            android:text="XÓA"
-            android:backgroundTint="#F44336"
-            android:textColor="#FFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
+            android:layout_height="36dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/bg_wp_btn_danger"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:text="Xóa"
+            android:textColor="#FFFFFF" />
     </LinearLayout>
 
-    <!-- THÔNG SỐ TỐC ĐỘ TẢI (MỚI THÊM) -->
-    <TextView
-        android:id="@+id/tvSpeedStats"
+    <!-- ===== TAB + TRẠNG THÁI ===== -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:layout_marginBottom="4dp"
-        android:gravity="center"
-        android:text="DL: 0 KB/s | UL: 0 KB/s"
-        android:textColor="#00FF00"
-        android:textSize="13sp"
-        android:textStyle="bold" />
+        android:layout_marginTop="10dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-    <!-- DANH SÁCH ẢNH / VIDEO -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="38dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_wp_segment"
+            android:orientation="horizontal"
+            android:padding="3dp">
+
+            <TextView
+                android:id="@+id/tabDrone"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_st_tab_item"
+                android:gravity="center"
+                android:text="Thẻ nhớ drone"
+                android:textColor="@color/txt_st_tab"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tabPhone"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_st_tab_item"
+                android:gravity="center"
+                android:text="Trên điện thoại"
+                android:textColor="@color/txt_st_tab"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <!-- Tốc độ tải / tiến trình đẩy Cloud -->
+        <TextView
+            android:id="@+id/tvSpeedStats"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:layout_weight="0.9"
+            android:background="@drawable/bg_st_status"
+            android:gravity="center"
+            android:maxLines="3"
+            android:minHeight="38dp"
+            android:paddingStart="10dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="10dp"
+            android:paddingBottom="4dp"
+            android:text="DL: 0 KB/s | UL: 0 KB/s"
+            android:textColor="#69F0AE"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- ===== DANH SÁCH ẢNH / VIDEO TRÊN THẺ NHỚ DRONE ===== -->
     <GridView
         android:id="@+id/gridStorage"
         android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:layout_marginTop="10dp"
         android:layout_weight="1"
-        android:numColumns="3"
+        android:clipToPadding="false"
+        android:columnWidth="128dp"
         android:horizontalSpacing="8dp"
-        android:verticalSpacing="8dp"
-        android:padding="5dp"
-        android:clipToPadding="false" />
+        android:listSelector="@android:color/transparent"
+        android:numColumns="auto_fit"
+        android:paddingBottom="6dp"
+        android:scrollbarSize="2dp"
+        android:stretchMode="columnWidth"
+        android:verticalSpacing="8dp" />
 
+    <!-- ===== ẢNH ĐÃ LƯU TRÊN ĐIỆN THOẠI ===== -->
+    <GridView
+        android:id="@+id/gridLocal"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="10dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:columnWidth="128dp"
+        android:horizontalSpacing="8dp"
+        android:listSelector="@android:color/transparent"
+        android:numColumns="auto_fit"
+        android:paddingBottom="6dp"
+        android:scrollbarSize="2dp"
+        android:stretchMode="columnWidth"
+        android:verticalSpacing="8dp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/tvLocalEmpty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:drawablePadding="8dp"
+        android:gravity="center"
+        android:lineSpacingExtra="4dp"
+        android:text="Chưa có file nào trên điện thoại\nẢnh chụp khi quay và bản xem nhanh của video sẽ hiện ở đây"
+        android:textColor="#9AA0A6"
+        android:textSize="12sp"
+        android:visibility="gone" />
 </LinearLayout>

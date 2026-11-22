@@ -1,53 +1,209 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- Màn hình CHỌN KHU VỰC RUỘNG: bản đồ toàn màn hình + các thẻ/nút nổi -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#15181C">
 
-    <!-- Sử dụng MapView của MapLibre -->
     <org.maplibre.android.maps.MapView
         android:id="@+id/mapView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:layout_above="@id/bottomPanel" />
+        android:layout_height="match_parent" />
 
-    <!-- === ĐÃ THÊM MỚI VÀO ĐÂY: Nút chuyển bản đồ Vệ tinh === -->
-    <Button
-        android:id="@+id/btnMapType"
+    <!-- ===== THẺ HƯỚNG DẪN (trên trái) ===== -->
+    <LinearLayout
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Đổi Bản Đồ" />
-    <!-- ======================================================= -->
-    <!-- Nút quay về vị trí của tôi -->
-    <Button
+        android:layout_gravity="top|start"
+        android:layout_margin="12dp"
+        android:background="@drawable/bg_map_card"
+        android:elevation="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="6dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp">
+
+        <ImageButton
+            android:id="@+id/btnMapBack"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="@drawable/bg_wp_close"
+            android:contentDescription="Quay lại"
+            android:padding="8dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_map_back" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Chọn khu vực ruộng"
+                android:textColor="#FFFFFF"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvMapHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:maxWidth="300dp"
+                android:text="Chạm lên bản đồ để đặt góc 1 / 4"
+                android:textColor="#9AA0A6"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ===== CỤM NÚT NỔI (phải) ===== -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="12dp"
+        android:gravity="end"
+        android:orientation="vertical">
+
+        <!-- Đổi kiểu bản đồ: Bản đồ / Vệ tinh -->
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnMapType"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_map_chip"
+            android:drawableStart="@drawable/ic_map_layers"
+            android:drawablePadding="6dp"
+            android:drawableTint="#69F0AE"
+            android:elevation="6dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="14dp"
+            android:stateListAnimator="@null"
+            android:text="Vệ tinh"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <ImageButton
+            android:id="@+id/btnUndoPoint"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_map_fab"
+            android:contentDescription="Xóa góc vừa đặt"
+            android:elevation="6dp"
+            android:enabled="false"
+            android:padding="11dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_map_undo" />
+    </LinearLayout>
+
+    <!-- Về vị trí của tôi (phải, trên thẻ dưới) -->
+    <ImageButton
         android:id="@+id/btnMyLocation"
         android:layout_width="48dp"
         android:layout_height="48dp"
-        android:layout_alignParentEnd="true"
-        android:layout_above="@id/bottomPanel"
-        android:layout_marginEnd="16dp"
-        android:layout_marginBottom="16dp"
-        android:backgroundTint="#2196F3"
-        android:elevation="4dp"
-        android:padding="0dp"
-        android:text="📍"
-        android:textColor="#FFFFFF"
-        android:textSize="20sp" />
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="92dp"
+        android:background="@drawable/bg_map_fab"
+        android:contentDescription="Về vị trí của tôi"
+        android:elevation="6dp"
+        android:padding="12dp"
+        android:scaleType="fitCenter"
+        android:src="@drawable/ic_map_my_location"
+        android:tint="#69F0AE" />
+
+    <!-- ===== THẺ DƯỚI: DIỆN TÍCH + XÁC NHẬN ===== -->
     <LinearLayout
         android:id="@+id/bottomPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:background="@android:color/white"
-        android:padding="16dp">
+        android:layout_gravity="bottom"
+        android:layout_margin="12dp"
+        android:background="@drawable/bg_map_card"
+        android:elevation="6dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="16dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="10dp">
 
-        <Button
-            android:id="@+id/btnConfirmTarget"
-            android:layout_width="match_parent"
+        <!-- Diện tích -->
+        <LinearLayout
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="XÁC NHẬN CHỌN ĐIỂM NÀY"
-            android:backgroundTint="#4CAF50"
-            android:textColor="@android:color/white"
-            android:textStyle="bold" />
+            android:orientation="vertical">
 
+            <TextView
+                android:id="@+id/tvMapArea"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="— ha"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Diện tích ruộng"
+                android:textColor="#9AA0A6"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <View
+            android:layout_width="1dp"
+            android:layout_height="34dp"
+            android:layout_marginStart="18dp"
+            android:layout_marginEnd="18dp"
+            android:background="#26FFFFFF" />
+
+        <!-- Tiến độ 4 góc -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:id="@+id/mapCornerDots"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+
+            <TextView
+                android:id="@+id/tvMapCorners"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="5dp"
+                android:text="0 / 4 góc"
+                android:textColor="#9AA0A6"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btnConfirmTarget"
+            style="@style/WpButton"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:background="@drawable/bg_cf_btn_fly"
+            android:enabled="false"
+            android:paddingStart="22dp"
+            android:paddingEnd="22dp"
+            android:text="✓  Xác nhận khu vực"
+            android:textColor="@color/txt_cf_btn_fly" />
     </LinearLayout>
-</RelativeLayout>
+</FrameLayout>
