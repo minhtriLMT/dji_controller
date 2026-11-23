@@ -1655,7 +1655,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (!wpVideo) {
             TextView note = cf.findViewById(R.id.tvCfSpeedNote);
             note.setText(String.format(Locale.US,
-                    "ⓘ Drone dừng hẳn ~%.0f s ở mỗi điểm chụp để ảnh nét (đã tính vào thời gian)",
+                    "ⓘ Drone dừng ~%.0f s ở mỗi điểm: chụp ảnh nét + tải ảnh đẩy lên Cloud (đã tính vào thời gian)",
                     FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE));
             note.setVisibility(View.VISIBLE);
         }
@@ -2294,6 +2294,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     }
 
                     @Override
+                    public void onCloudUpload(int uploaded, int failed, int pending, String message) {
+                        wpCloudUploaded = uploaded;
+                        wpCloudFailed = failed;
+                        wpCloudPending = pending;
+                        updateCapturePanel();
+                    }
+
+                    @Override
                     public void onCheckpointSaved(com.tri.djicontrol.flight.MissionCheckpoint checkpoint) {
                         // Lần kết nối/thay pin tới sẽ được hỏi bay tiếp
                         resumePromptShown = false;
@@ -2403,6 +2411,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     // =========================================================
     private boolean wpCaptureVideo = false;
     private int wpCapturedPhotos = 0;
+    /** Ảnh WP đã đẩy lên Cloudinary / lỗi / đang đẩy (-1 = chưa bật upload). */
+    private int wpCloudUploaded = -1, wpCloudFailed = 0, wpCloudPending = 0;
     private boolean wpRecording = false;
     private long wpRecordStartMs = 0, wpRecordedMs = 0;
     private final Handler capturePanelHandler = new Handler(Looper.getMainLooper());
@@ -2418,6 +2428,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         capturePanelHandler.removeCallbacks(capturePanelTicker);
         wpCaptureVideo = video;
         wpCapturedPhotos = 0;
+        wpCloudUploaded = -1;
+        wpCloudFailed = 0;
+        wpCloudPending = 0;
         wpRecording = false;
         wpRecordStartMs = 0;
         wpRecordedMs = 0;
@@ -2431,6 +2444,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         int color = 0xFF69F0AE;
         if (!wpCaptureVideo) {
             value = wpCapturedPhotos + " ảnh";
+            if (wpCloudUploaded >= 0) {
+                value += " • ☁ " + wpCloudUploaded;
+                if (wpCloudPending > 0) value += " (đang đẩy " + wpCloudPending + ")";
+                if (wpCloudFailed > 0) value += " • lỗi " + wpCloudFailed;
+            }
         } else if (wpRecording) {
             value = "● REC " + formatDuration(System.currentTimeMillis() - wpRecordStartMs);
             color = 0xFFFF5252;
