@@ -190,12 +190,12 @@
                         android:id="@+id/rbWPPhoto"
                         style="@style/WpSegment"
                         android:checked="true"
-                        android:text="📷  Chụp ảnh" />
+                        android:text="Chụp ảnh" />
 
                     <RadioButton
                         android:id="@+id/rbWPVideo"
                         style="@style/WpSegment"
-                        android:text="🎥  Quay video" />
+                        android:text="Quay video" />
                 </RadioGroup>
 
                 <!-- Pin yếu -> về Home, lưu tiến độ để bay tiếp -->
@@ -304,7 +304,7 @@
 
                         <TextView
                             style="@style/WpRange"
-                            android:text="5 – 120 m" />
+                            android:text="0 – 120 m" />
                     </LinearLayout>
 
                     <!-- Khoảng cách đường bay -->
@@ -364,6 +364,81 @@
                             style="@style/WpRange"
                             android:text="0.5 – 10 m/s" />
                     </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:layout_marginTop="8dp"
+                    android:text="ĐỘ CAO BAY RA / BAY VỀ" />
+
+                <LinearLayout
+                    style="@style/WpCard"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <!-- Bay từ chỗ cất cánh tới ruộng -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/WpFieldLabel"
+                            android:text="Độ cao bay ra" />
+
+                        <LinearLayout style="@style/WpInputBox">
+
+                            <EditText
+                                android:id="@+id/edtWPTransitAlt"
+                                style="@style/WpInput"
+                                android:text="20" />
+
+                            <TextView
+                                style="@style/WpUnit"
+                                android:text="m" />
+                        </LinearLayout>
+
+                        <TextView
+                            style="@style/WpRange"
+                            android:text="0 – 120 m" />
+                    </LinearLayout>
+
+                    <!-- Bay về Home (Go Home Height của DJI) -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            style="@style/WpFieldLabel"
+                            android:text="Độ cao bay về" />
+
+                        <LinearLayout style="@style/WpInputBox">
+
+                            <EditText
+                                android:id="@+id/edtWPReturnAlt"
+                                style="@style/WpInput"
+                                android:text="30" />
+
+                            <TextView
+                                style="@style/WpUnit"
+                                android:text="m" />
+                        </LinearLayout>
+
+                        <TextView
+                            style="@style/WpRange"
+                            android:text="20 – 120 m" />
+                    </LinearLayout>
+
+                    <!-- giữ 3 cột thẳng hàng với hàng trên -->
+                    <Space
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1" />
                 </LinearLayout>
 
                 <TextView

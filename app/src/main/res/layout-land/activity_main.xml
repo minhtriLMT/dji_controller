@@ -71,12 +71,12 @@
         <TextView
             android:id="@+id/tvChipBattery"
             style="@style/StatusChip"
-            android:text="PIN --%" />
+            android:text="-- phút" />
 
         <TextView
             android:id="@+id/tvChipRc"
             style="@style/StatusChip"
-            android:text="RC --%" />
+            android:text="RC" />
 
         <TextView
             android:id="@+id/tvChipSd"

@@ -1,0 +1,32 @@
+{
+  "version": 8,
+  "sources": {
+    "sat-tiles": {
+      "type": "raster",
+      "tiles": [
+        "https://mt0.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        "https://mt2.google.com/vt/lyrs=s&x={x}&y={y}&z={z}",
+        "https://mt3.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
+      ],
+      "tileSize": 256,
+      "minzoom": 0,
+      "maxzoom": 20,
+      "attribution": "Imagery &copy; Google"
+    }
+  },
+  "layers": [
+    {
+      "id": "sat-background",
+      "type": "background",
+      "paint": { "background-color": "#20262b" }
+    },
+    {
+      "id": "sat-tiles-layer",
+      "type": "raster",
+      "source": "sat-tiles",
+      "minzoom": 0,
+      "maxzoom": 22
+    }
+  ]
+}

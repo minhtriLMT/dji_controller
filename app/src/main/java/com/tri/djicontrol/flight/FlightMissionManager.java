@@ -70,7 +70,7 @@ public class FlightMissionManager {
     private static final String TAG = "FlightMissionManager";
     private static final long LOOP_MS = 100;              // 10Hz (DJI khuyến nghị 5–25Hz)
     private static final double ARRIVE_RADIUS = 1.5;      // m
-    private static final float TRANSIT_ALT_MIN = 20f;     // độ cao di chuyển an toàn tối thiểu
+    private static final float TRANSIT_ALT_DEFAULT = 20f; // độ cao bay ra mặc định
     private static final float MAX_TRANSIT_SPEED = 5f;    // m/s
     private static final long MIN_PHOTO_GAP_MS = 2200;    // Mini 2 cần ~2s để ghi 1 ảnh
 
@@ -147,6 +147,22 @@ public class FlightMissionManager {
         batteryPercent = percent;
     }
 
+    // Độ cao bay ra (tới ruộng) và bay về Home do người dùng đặt
+    private float transitAltSetting = TRANSIT_ALT_DEFAULT;
+    private int returnAltSetting = 30;
+    public static final int RETURN_ALT_MIN = 20;  // DJI không nhận độ cao RTH dưới 20 m
+    public static final int RETURN_ALT_MAX = 120;
+
+    /** Độ cao bay từ chỗ cất cánh tới ruộng (m). Không thấp hơn độ cao quét. */
+    public void setTransitAltitude(float meters) {
+        transitAltSetting = Math.max(0f, Math.min(120f, meters));
+    }
+
+    /** Độ cao drone bay về Home (ghi vào Go Home Height của DJI trước khi bay). */
+    public void setReturnAltitude(int meters) {
+        returnAltSetting = Math.max(RETURN_ALT_MIN, Math.min(RETURN_ALT_MAX, meters));
+    }
+
     /** Ngưỡng pin (%) để dừng quét và về nhà. */
     public void setLowBatteryThreshold(int percent) {
         lowBatteryPercent = Math.max(15, Math.min(80, percent));
@@ -198,7 +214,7 @@ public class FlightMissionManager {
         waypoints = gridPoints;
         wpIndex = 0;
         scanAlt = scanAltitude;
-        transitAlt = Math.max(scanAltitude, TRANSIT_ALT_MIN);
+        transitAlt = Math.max(scanAltitude, transitAltSetting);
         cruiseSpeed = speed;
         videoMode = video;
         this.photoDistance = Math.max(1.0, photoDistance);
@@ -230,7 +246,21 @@ public class FlightMissionManager {
 
         setGimbalAngle(0f);
 
-        if (st.isFlying()) {
+        // Đặt độ cao bay về (RTH) trước, để lúc xong / pin yếu drone về đúng độ cao người dùng chọn
+        final int returnAlt = returnAltSetting;
+        status(String.format(Locale.US, "Đặt độ cao bay về %d m...", returnAlt));
+        flightController.setGoHomeHeightInMeters(returnAlt, hErr -> handler.post(() -> {
+            if (!running) return;
+            if (hErr != null) {
+                finish(false, "Không đặt được độ cao bay về " + returnAlt + " m: " + hErr.getDescription());
+                return;
+            }
+            launch(flightController.getState());
+        }));
+    }
+
+    private void launch(FlightControllerState st) {
+        if (st != null && st.isFlying()) {
             enableVirtualStick();
         } else {
             setState(State.TAKING_OFF);

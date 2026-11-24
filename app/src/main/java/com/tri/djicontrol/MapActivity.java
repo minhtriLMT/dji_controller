@@ -39,11 +39,8 @@ import org.maplibre.android.annotations.MarkerOptions;
 import org.maplibre.android.style.expressions.Expression;
 import org.maplibre.android.style.layers.FillLayer;
 import org.maplibre.android.style.layers.LineLayer;
-import org.maplibre.android.style.layers.RasterLayer;
 import org.maplibre.android.style.layers.SymbolLayer;
 import org.maplibre.android.style.sources.GeoJsonSource;
-import org.maplibre.android.style.sources.RasterSource;
-import org.maplibre.android.style.sources.TileSet;
 import org.maplibre.geojson.Feature;
 import org.maplibre.geojson.LineString;
 import org.maplibre.geojson.Polygon;
@@ -232,15 +229,10 @@ public class MapActivity extends AppCompatActivity {
     private void reloadMapStyle() {
         if (mapLibreMap == null) return;
 
-        Style.Builder styleBuilder;
-        if (isSatellite) {
-            String SATELLITE_URL = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}";
-            styleBuilder = new Style.Builder()
-                    .withSource(new RasterSource("sat-source", new TileSet("tileset", SATELLITE_URL), 256))
-                    .withLayer(new RasterLayer("sat-layer", "sat-source"));
-        } else {
-            styleBuilder = new Style.Builder().fromUri("asset://osm_style.json");
-        }
+        // Dùng style JSON trong assets cho cả 2 chế độ (style dựng bằng code với
+        // TileSet("tileset", ...) bị đen màn hình khi bật vệ tinh). Có nền tối khi tile đang tải.
+        Style.Builder styleBuilder = new Style.Builder().fromUri(
+                isSatellite ? "asset://satellite_style.json" : "asset://osm_style.json");
 
         mapLibreMap.setStyle(styleBuilder, style -> {
             enableLocationComponent(style);

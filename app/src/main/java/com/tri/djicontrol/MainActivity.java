@@ -42,6 +42,7 @@ import android.widget.LinearLayout;
 import android.view.WindowManager;
 import android.app.Dialog;
 import android.widget.FrameLayout;
+import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -140,7 +141,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private DJICodecManager codecManager;
 
     private String sdStatusStr = "Thẻ: Sẵn sàng";
+    // Trạng thái thẻ nhớ (cập nhật từ StorageStateCallback) cho hộp thoại Cài đặt
+    private volatile boolean sdInserted = false, sdFull = false, sdHasError = false;
+    private volatile int sdTotalMB = 0, sdRemainMB = 0;
     private int batteryPercent = 0;
+    // Thời gian bay còn lại (giây) do flight controller ước tính; 0 = chưa có (vd. đang ở dưới đất)
+    private volatile int remainingFlightSec = 0;
     private int rcSignalPercent = 0;
     private int photoCount = 0;
     private boolean isHomePointSet = false;
@@ -335,7 +341,21 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         statusDot = findViewById(R.id.statusDot);
         tvChipGps = findViewById(R.id.tvChipGps);
         tvChipBattery = findViewById(R.id.tvChipBattery);
+        // Chip PIN: vòng tròn % pin + thời gian bay còn lại
+        batteryRing = new BatteryRingDrawable(getResources().getDisplayMetrics().density,
+                getResources().getDisplayMetrics().scaledDensity);
+        tvChipBattery.setCompoundDrawableTintList(null);
+        tvChipBattery.setCompoundDrawablesRelative(batteryRing, null, null, null);
+        tvChipBattery.setPaddingRelative(Math.round(3 * getResources().getDisplayMetrics().density),
+                0, tvChipBattery.getPaddingEnd(), 0);
+        setBatteryChip(-1);
         tvChipRc = findViewById(R.id.tvChipRc);
+        // Chip RC: cột sóng thay cho chấm tròn + %
+        rcBars = new SignalBarsDrawable(getResources().getDisplayMetrics().density);
+        tvChipRc.setCompoundDrawableTintList(null);
+        tvChipRc.setCompoundDrawablesRelative(rcBars, null, null, null);
+        tvChipRc.setText("RC");
+        setRcSignal(-1);
         tvChipSd = findViewById(R.id.tvChipSd);
         tvChipHome = findViewById(R.id.tvChipHome);
         tvTeleAlt = findViewById(R.id.tvTeleAlt);
@@ -362,6 +382,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         videoSurface = findViewById(R.id.video_preview_texture_view);
         btnLockRoute.setOnClickListener(v -> openWPDialog());
+        findViewById(R.id.btnCameraMenu).setOnClickListener(v -> showSettingsMenu());
 
         cameraControlPanel = findViewById(R.id.cameraControlPanel);
         cameraModePicker = findViewById(R.id.cameraModePicker);
@@ -479,6 +500,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         }
                     }
                     missionManager = new FlightMissionManager(MainActivity.this);
+                    missionManager.setTransitAltitude(wpTransitAlt);
+                    missionManager.setReturnAltitude(wpReturnAlt);
                     com.tri.djicontrol.firebase.UploadMeta.refreshDroneInfo();
                     if (DJISDKManager.getInstance().getProduct() != null) {
                         Aircraft aircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
@@ -522,6 +545,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             }
 
                             camera.setStorageStateCallBack(storageState -> {
+                                sdInserted = storageState.isInserted();
+                                sdFull = storageState.isFull();
+                                sdHasError = storageState.hasError();
+                                sdTotalMB = storageState.getTotalSpaceInMB();
+                                sdRemainMB = storageState.getRemainingSpaceInMB();
                                 if (storageState.isInserted()) {
                                     if (storageState.isFull()) sdStatusStr = "Thẻ: ĐẦY";
                                     else if (storageState.hasError()) sdStatusStr = "Thẻ: LỖI";
@@ -581,6 +609,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             fc.setStateCallback(state -> {
                                 if (state != null) {
                                     int satellites = state.getSatelliteCount();
+                                    remainingFlightSec = state.getGoHomeAssessment() != null
+                                            ? state.getGoHomeAssessment().getRemainingFlightTime() : 0;
                                     float currentAlt = state.getAircraftLocation() != null ? state.getAircraftLocation().getAltitude() : 0.0f;
 
                                     if (state.getAircraftLocation() != null) {
@@ -1212,26 +1242,259 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         });
     }
 
-    private void formatSDCard() {
-        if (DJISDKManager.getInstance().getProduct() == null) {
+    // =========================================================
+    // HỘP THOẠI CÀI ĐẶT (nút ⚙): Thẻ nhớ + độ cao Return To Home
+    // =========================================================
+    private static final int GO_HOME_MIN_M = 20;
+    private static final int GO_HOME_MAX_M = 500;
+
+    private void showSettingsMenu() {
+        android.app.Dialog d = new android.app.Dialog(this, R.style.CfDialog);
+        d.setContentView(R.layout.dialog_settings);
+        d.setCancelable(true);
+
+        Aircraft aircraft = DJISDKManager.getInstance().getProduct() instanceof Aircraft
+                ? (Aircraft) DJISDKManager.getInstance().getProduct() : null;
+        boolean connected = aircraft != null && aircraft.isConnected();
+
+        TextView tvConn = d.findViewById(R.id.tvStConn);
+        tvConn.setText(connected ? "● ĐÃ KẾT NỐI" : "● CHƯA KẾT NỐI");
+        tvConn.setTextColor(connected ? 0xFF69F0AE : 0xFFFF6E66);
+        tvConn.setBackgroundTintList(connected ? null
+                : android.content.res.ColorStateList.valueOf(0x40F44336));
+        d.findViewById(R.id.btnStClose).setOnClickListener(v -> d.dismiss());
+
+        // ---------- THẺ NHỚ ----------
+        Button btnFormat = d.findViewById(R.id.btnStFormat);
+        Runnable refreshSd = () -> bindSdInfo(d, connected);
+        refreshSd.run();
+        btnFormat.setOnClickListener(v -> showFormatConfirmDialog(() -> {
+            btnFormat.setEnabled(false);
+            btnFormat.setText("ĐANG FORMAT…");
+            formatSDCard(ok -> {
+                btnFormat.setText("🗑  FORMAT THẺ NHỚ");
+                // Chờ StorageStateCallback cập nhật dung lượng mới rồi vẽ lại
+                new Handler(Looper.getMainLooper()).postDelayed(refreshSd, 800);
+            });
+        }));
+
+        // ---------- RETURN TO HOME ----------
+        bindGoHomeHeight(d, connected ? aircraft.getFlightController() : null);
+
+        d.show();
+        if (d.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            int width = (int) Math.min(dm.widthPixels * 0.9f, 660 * dm.density);
+            d.getWindow().setLayout(width, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+                    | WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
+        }
+    }
+
+    private static String formatMB(int mb) {
+        return mb >= 1024 ? String.format(Locale.US, "%.1f GB", mb / 1024f) : mb + " MB";
+    }
+
+    /** Vẽ khối Thẻ nhớ theo trạng thái hiện tại. */
+    private void bindSdInfo(android.app.Dialog d, boolean connected) {
+        TextView tvUsed = d.findViewById(R.id.tvStSdUsed);
+        TextView tvState = d.findViewById(R.id.tvStSdState);
+        TextView tvFree = d.findViewById(R.id.tvStSdFree);
+        ProgressBar pb = d.findViewById(R.id.pbStSd);
+        Button btnFormat = d.findViewById(R.id.btnStFormat);
+
+        String state;
+        int color;
+        if (!connected) { state = "CHƯA KẾT NỐI"; color = 0xFF9AA0A6; }
+        else if (!sdInserted) { state = "CHƯA CẮM"; color = 0xFFFF6E66; }
+        else if (sdHasError) { state = "LỖI"; color = 0xFFFF6E66; }
+        else if (sdFull) { state = "ĐẦY"; color = 0xFFFFD54F; }
+        else { state = "OK"; color = 0xFF69F0AE; }
+        tvState.setText(state);
+        tvState.setTextColor(color);
+        tvState.setBackgroundTintList(android.content.res.ColorStateList.valueOf((color & 0x00FFFFFF) | 0x26000000));
+
+        if (connected && sdInserted && sdTotalMB > 0) {
+            int used = Math.max(0, sdTotalMB - sdRemainMB);
+            tvUsed.setText(formatMB(used) + " / " + formatMB(sdTotalMB));
+            tvFree.setText("Còn trống: " + formatMB(sdRemainMB));
+            int prog = (int) (used * 1000L / sdTotalMB);
+            pb.setProgress(prog);
+            int bar = prog >= 900 ? 0xFFFF6E66 : prog >= 750 ? 0xFFFFD54F : 0xFF69F0AE;
+            pb.setProgressTintList(android.content.res.ColorStateList.valueOf(bar));
+        } else {
+            tvUsed.setText("—");
+            tvFree.setText(connected ? "Không đọc được dung lượng thẻ" : "Kết nối drone để xem thẻ nhớ");
+            pb.setProgress(0);
+        }
+        btnFormat.setEnabled(connected && sdInserted);
+    }
+
+    /** Khối Độ cao RTH: đọc giá trị từ drone, chỉnh bằng −/+, thanh kéo hoặc gõ số. */
+    private void bindGoHomeHeight(android.app.Dialog d, FlightController fc) {
+        EditText et = d.findViewById(R.id.etStRth);
+        SeekBar sb = d.findViewById(R.id.sbStRth);
+        TextView tvCurrent = d.findViewById(R.id.tvStRthCurrent);
+        Button btnMinus = d.findViewById(R.id.btnStRthMinus);
+        Button btnPlus = d.findViewById(R.id.btnStRthPlus);
+        Button btnSave = d.findViewById(R.id.btnStRthSave);
+        ((TextView) d.findViewById(R.id.tvStRthMin)).setText(GO_HOME_MIN_M + " m");
+        ((TextView) d.findViewById(R.id.tvStRthMax)).setText(GO_HOME_MAX_M + " m");
+
+        sb.setMax(GO_HOME_MAX_M - GO_HOME_MIN_M);
+        final int[] droneValue = {-1};       // giá trị đang lưu trên drone
+        final boolean[] syncing = {false};   // tránh vòng lặp EditText <-> SeekBar
+
+        Runnable updateSave = () -> {
+            int v = parseIntOr(et.getText().toString(), -1);
+            boolean valid = v >= GO_HOME_MIN_M && v <= GO_HOME_MAX_M;
+            btnSave.setEnabled(fc != null && valid && v != droneValue[0]);
+            et.setTextColor(valid || et.getText().length() == 0 ? 0xFFFFFFFF : 0xFFFF6E66);
+        };
+        java.util.function.IntConsumer setValue = v -> {
+            v = Math.max(GO_HOME_MIN_M, Math.min(GO_HOME_MAX_M, v));
+            syncing[0] = true;
+            et.setText(String.valueOf(v));
+            et.setSelection(et.getText().length());
+            sb.setProgress(v - GO_HOME_MIN_M);
+            syncing[0] = false;
+            updateSave.run();
+        };
+
+        sb.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar s, int p, boolean fromUser) {
+                if (fromUser && !syncing[0]) {
+                    // bước 5 m khi kéo cho dễ chọn số tròn
+                    int v = GO_HOME_MIN_M + Math.round(p / 5f) * 5;
+                    setValue.accept(v);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar s) { et.clearFocus(); }
+            @Override public void onStopTrackingTouch(SeekBar s) { }
+        });
+        et.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a, int b, int e) { }
+            @Override public void onTextChanged(CharSequence c, int a, int b, int e) { }
+            @Override public void afterTextChanged(android.text.Editable e) {
+                if (syncing[0]) return;
+                int v = parseIntOr(e.toString(), -1);
+                if (v >= GO_HOME_MIN_M && v <= GO_HOME_MAX_M) {
+                    syncing[0] = true;
+                    sb.setProgress(v - GO_HOME_MIN_M);
+                    syncing[0] = false;
+                }
+                updateSave.run();
+            }
+        });
+        btnMinus.setOnClickListener(v -> setValue.accept(parseIntOr(et.getText().toString(), GO_HOME_MIN_M) - 5));
+        btnPlus.setOnClickListener(v -> setValue.accept(parseIntOr(et.getText().toString(), GO_HOME_MIN_M) + 5));
+
+        if (fc == null) {
+            tvCurrent.setText("Kết nối drone để cài độ cao RTH");
+            et.setEnabled(false);
+            sb.setEnabled(false);
+            btnMinus.setEnabled(false);
+            btnPlus.setEnabled(false);
+            btnSave.setEnabled(false);
+            return;
+        }
+
+        fc.getGoHomeHeightInMeters(new CommonCallbacks.CompletionCallbackWith<Integer>() {
+            @Override
+            public void onSuccess(Integer h) {
+                runOnUiThread(() -> {
+                    droneValue[0] = h;
+                    tvCurrent.setText("Đang lưu trên drone: " + h + " m");
+                    setValue.accept(h);
+                });
+            }
+
+            @Override
+            public void onFailure(DJIError djiError) {
+                runOnUiThread(() -> {
+                    tvCurrent.setText("Không đọc được độ cao hiện tại");
+                    setValue.accept(30);
+                });
+            }
+        });
+
+        btnSave.setOnClickListener(v -> {
+            int h = parseIntOr(et.getText().toString(), -1);
+            if (h < GO_HOME_MIN_M || h > GO_HOME_MAX_M) return;
+            btnSave.setEnabled(false);
+            btnSave.setText("ĐANG LƯU…");
+            fc.setGoHomeHeightInMeters(h, djiError -> runOnUiThread(() -> {
+                btnSave.setText("✓  LƯU ĐỘ CAO");
+                if (djiError == null) {
+                    droneValue[0] = h;
+                    tvCurrent.setText("Đang lưu trên drone: " + h + " m");
+                    Toast.makeText(MainActivity.this, "Đã đặt độ cao RTH: " + h + " m", Toast.LENGTH_SHORT).show();
+                } else {
+                    Toast.makeText(MainActivity.this, "Lỗi đặt độ cao RTH: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                }
+                updateSave.run();
+            }));
+        });
+    }
+
+    private static int parseIntOr(String s, int def) {
+        try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
+    }
+
+    /** Xác nhận format: phải gõ FORMAT mới bật nút. */
+    private void showFormatConfirmDialog(Runnable onConfirm) {
+        android.app.Dialog d = new android.app.Dialog(this, R.style.CfDialog);
+        d.setContentView(R.layout.dialog_format_confirm);
+        d.setCancelable(true);
+
+        TextView info = d.findViewById(R.id.tvFcInfo);
+        if (sdInserted && sdTotalMB > 0) {
+            info.setText("Sẽ xóa " + formatMB(Math.max(0, sdTotalMB - sdRemainMB)) + " dữ liệu · không thể hoàn tác");
+        }
+        EditText et = d.findViewById(R.id.etFcConfirm);
+        Button btnOk = d.findViewById(R.id.btnFcFormat);
+        et.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence c, int a, int b, int e) { }
+            @Override public void onTextChanged(CharSequence c, int a, int b, int e) { }
+            @Override public void afterTextChanged(android.text.Editable e) {
+                btnOk.setEnabled("FORMAT".equalsIgnoreCase(e.toString().trim()));
+            }
+        });
+        d.findViewById(R.id.btnFcCancel).setOnClickListener(v -> d.dismiss());
+        btnOk.setOnClickListener(v -> {
+            d.dismiss();
+            onConfirm.run();
+        });
+
+        d.show();
+        if (d.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            d.getWindow().setLayout((int) Math.min(dm.widthPixels * 0.9f, 420 * dm.density),
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+        }
+    }
+
+    private void formatSDCard(java.util.function.Consumer<Boolean> onDone) {
+        if (!(DJISDKManager.getInstance().getProduct() instanceof Aircraft)) {
             Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            if (onDone != null) onDone.accept(false);
             return;
         }
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
-        if (camera != null) {
-            Toast.makeText(this, "Đang tiến hành Format thẻ...", Toast.LENGTH_SHORT).show();
-            camera.formatStorage(SettingsDefinitions.StorageLocation.SDCARD, djiError -> {
-                runOnUiThread(() -> {
-                    if (djiError == null) {
-                        Toast.makeText(MainActivity.this, "Format thẻ nhớ THÀNH CÔNG!", Toast.LENGTH_LONG).show();
-                    } else {
-                        Toast.makeText(MainActivity.this, "Lỗi format: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
-                    }
-                });
-            });
-        } else {
+        if (camera == null) {
             Toast.makeText(this, "Không tìm thấy Camera/Thẻ nhớ!", Toast.LENGTH_SHORT).show();
+            if (onDone != null) onDone.accept(false);
+            return;
         }
+        camera.formatStorage(SettingsDefinitions.StorageLocation.SDCARD, djiError -> runOnUiThread(() -> {
+            if (djiError == null) {
+                Toast.makeText(MainActivity.this, "Format thẻ nhớ THÀNH CÔNG!", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(MainActivity.this, "Lỗi format: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+            }
+            if (onDone != null) onDone.accept(djiError == null);
+        }));
     }
 
     private void triggerManualCapture() {
@@ -1308,10 +1571,60 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         statusDot.setBackgroundTintList(android.content.res.ColorStateList.valueOf(c));
         if (Boolean.FALSE.equals(connected)) {
             setChip(tvChipGps, "GPS --", C_IDLE);
-            setChip(tvChipBattery, "PIN --%", C_IDLE);
-            setChip(tvChipRc, "RC --%", C_IDLE);
+            remainingFlightSec = 0;
+            setBatteryChip(-1);
+            rcSignalPercent = 0;
+            setRcSignal(0); // mất kết nối = mất sóng (đỏ)
             setChip(tvChipSd, "THẺ --", C_IDLE);
             setChip(tvChipHome, "HOME", C_IDLE);
+        }
+    }
+
+    private SignalBarsDrawable rcBars;
+    private BatteryRingDrawable batteryRing;
+
+    /** Thời gian bay ước tính của Mini 2 với pin đầy (thực tế, đã trừ dự phòng) — dùng khi FC chưa báo. */
+    private static final int FULL_BATTERY_FLIGHT_MIN = 25;
+
+    /** Chip PIN: vòng tròn % (màu theo ngưỡng) + "⏱ 18 phút" thời gian còn bay được. percent < 0 = chưa có. */
+    private void setBatteryChip(int percent) {
+        if (batteryRing == null || tvChipBattery == null) return;
+        if (percent < 0) {
+            batteryRing.setBattery(-1, C_IDLE);
+            tvChipBattery.setText("-- phút");
+            tvChipBattery.setContentDescription("Pin: chưa có dữ liệu");
+            return;
+        }
+        int color = percent <= Math.max(25, wpLowBattery) ? C_BAD : percent <= 50 ? C_WARN : C_GOOD;
+        batteryRing.setBattery(percent, color);
+
+        int sec = remainingFlightSec;
+        boolean estimated = sec <= 0;
+        if (estimated) sec = FULL_BATTERY_FLIGHT_MIN * 60 * percent / 100;
+        int min = sec / 60;
+        String time = min < 1 ? "<1 phút" : (estimated ? "≈" : "") + min + " phút";
+        tvChipBattery.setText(time);
+        tvChipBattery.setTextColor(color == C_BAD ? C_BAD : 0xFFE8EAED);
+        tvChipBattery.setContentDescription("Pin " + percent + "%, bay được khoảng " + min + " phút");
+    }
+
+    /**
+     * Cột sóng RC. percent < 0: chưa có dữ liệu (xám).
+     * 0 = mất sóng (đỏ) · 1–59 = sóng yếu (vàng) · ≥ 60 = đủ sóng (xanh lá).
+     */
+    private void setRcSignal(int percent) {
+        if (rcBars == null) return;
+        int bars, color;
+        if (percent < 0) { bars = 0; color = C_IDLE; }
+        else if (percent == 0) { bars = 1; color = C_BAD; }
+        else {
+            bars = percent >= 80 ? 4 : percent >= 60 ? 3 : percent >= 30 ? 2 : 1;
+            color = percent >= 60 ? C_GOOD : C_WARN;
+        }
+        rcBars.setSignal(bars, color);
+        if (tvChipRc != null) {
+            tvChipRc.setContentDescription(percent < 0 ? "Sóng RC: chưa có dữ liệu"
+                    : percent == 0 ? "Sóng RC: mất sóng" : "Sóng RC: " + percent + "%");
         }
     }
 
@@ -1325,12 +1638,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void updateStatusChips(int satellites) {
         setConnectionDot(true);
         setChip(tvChipGps, "GPS " + satellites, satellites >= 10 ? C_GOOD : satellites >= 6 ? C_WARN : C_BAD);
-        int bat = batteryPercent;
-        setChip(tvChipBattery, bat > 0 ? "PIN " + bat + "%" : "PIN --%",
-                bat <= 0 ? C_IDLE : bat <= Math.max(25, wpLowBattery) ? C_BAD : bat <= 50 ? C_WARN : C_GOOD);
-        int rc = rcSignalPercent;
-        setChip(tvChipRc, rc > 0 ? "RC " + rc + "%" : "RC --%",
-                rc <= 0 ? C_IDLE : rc >= 60 ? C_GOOD : rc >= 30 ? C_WARN : C_BAD);
+        setBatteryChip(batteryPercent > 0 ? batteryPercent : -1);
+        setRcSignal(rcSignalPercent);
         String sd = sdStatusStr != null ? sdStatusStr.replace("Thẻ: ", "") : "--";
         boolean sdOk = sd.equals("OK") || sd.equals("Sẵn sàng");
         setChip(tvChipSd, "THẺ " + (sd.equals("Sẵn sàng") ? "OK" : sd.toUpperCase(Locale.ROOT)), sdOk ? C_GOOD : C_BAD);
@@ -1477,6 +1786,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     // BAY QUÉT TỰ ĐỘNG (WP)
     // =========================================================
     private float wpAltitude = 10f;
+    private float wpTransitAlt = 20f;   // độ cao bay ra (tới ruộng)
+    private int wpReturnAlt = 30;       // độ cao bay về Home
     private double wpSpacing = 5.0;
     private float wpSpeed = 3f;
     private boolean wpVideo = false;
@@ -1630,7 +1941,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         float speed = wpEffectiveSpeed();
         double minutes = wpEstimatedMinutes(plan);
-        float transitAlt = Math.max(wpAltitude, 20f);
+        float transitAlt = Math.max(wpAltitude, wpTransitAlt);
         int shots = wpEstimatedShots(plan);
 
         TextView tvMode = cf.findViewById(R.id.tvCfMode);
@@ -1659,10 +1970,19 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE));
             note.setVisibility(View.VISIBLE);
         }
+        StringBuilder warnText = new StringBuilder();
+        if (wpAltitude < 5) {
+            warnText.append(String.format(Locale.US, "⚠  Độ cao quét %.0f m rất thấp: drone bay sát mặt đất, "
+                    + "dễ va cây/cột điện và có thể không giữ được độ cao này.", wpAltitude));
+        }
         if (minutes > 20) {
-            TextView warn = cf.findViewById(R.id.tvCfWarning);
-            warn.setText("⚠  Thời gian quét lâu hơn 1 pin Mini 2 (~25 phút bay). "
+            if (warnText.length() > 0) warnText.append("\n");
+            warnText.append("⚠  Thời gian quét lâu hơn 1 pin Mini 2 (~25 phút bay). "
                     + "Nên tăng khoảng cách đường bay hoặc chia nhỏ ruộng.");
+        }
+        if (warnText.length() > 0) {
+            TextView warn = cf.findViewById(R.id.tvCfWarning);
+            warn.setText(warnText);
             warn.setVisibility(View.VISIBLE);
         }
 
@@ -1670,12 +1990,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         LinearLayout steps = cf.findViewById(R.id.cfStepsContainer);
         java.util.List<String> stepTexts = new ArrayList<>();
         stepTexts.add("Tự cất cánh (nếu đang ở mặt đất)");
-        stepTexts.add(String.format(Locale.US, "Lên độ cao an toàn %.0f m", transitAlt));
+        stepTexts.add(String.format(Locale.US, "Bay ra ở độ cao %.0f m", transitAlt));
         stepTexts.add("Bay tới góc bắt đầu của ruộng");
         stepTexts.add(String.format(Locale.US, "%sQuét zigzag %d đường, %s",
                 transitAlt > wpAltitude ? String.format(Locale.US, "Hạ về %.0f m • ", wpAltitude) : "",
                 plan.lineCount, wpVideo ? "quay liên tục" : "dừng lại chụp mỗi điểm"));
-        stepTexts.add("Dừng camera và tự bay về Home");
+        stepTexts.add(String.format(Locale.US, "Dừng camera, bay về Home ở độ cao %d m", wpReturnAlt));
         LayoutInflater inf = LayoutInflater.from(this);
         for (int i = 0; i < stepTexts.size(); i++) {
             View item = inf.inflate(R.layout.item_cf_step, steps, false);
@@ -1817,6 +2137,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         // Nhớ thông số lần trước
         edtAlt.setText(String.format(Locale.US, "%.0f", wpAltitude));
+        EditText edtTransitAlt = dialog.findViewById(R.id.edtWPTransitAlt);
+        EditText edtReturnAlt = dialog.findViewById(R.id.edtWPReturnAlt);
+        edtTransitAlt.setText(String.format(Locale.US, "%.0f", wpTransitAlt));
+        edtReturnAlt.setText(String.valueOf(wpReturnAlt));
         edtSpacing.setText(String.format(Locale.US, "%.1f", wpSpacing));
         edtSpeed.setText(String.format(Locale.US, "%.1f", wpSpeed));
         if (wpVideo) rbVideo.setChecked(true); else rbPhoto.setChecked(true);
@@ -1840,12 +2164,25 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             float alt = parseFloat(edtAlt, -1);
             float spacing = parseFloat(edtSpacing, -1);
             float speed = parseFloat(edtSpeed, -1);
-            if (alt < 5 || alt > 120) { edtAlt.setError("5 – 120 m"); return false; }
+            if (alt < 0 || alt > 120) { edtAlt.setError("0 – 120 m"); return false; }
             if (spacing < 1 || spacing > 100) { edtSpacing.setError("1 – 100 m"); return false; }
             if (speed < 0.5f || speed > 10) { edtSpeed.setError("0.5 – 10 m/s"); return false; }
+            float transit = parseFloat(edtTransitAlt, -1);
+            float ret = parseFloat(edtReturnAlt, -1);
+            if (transit < 0 || transit > 120) { edtTransitAlt.setError("0 – 120 m"); return false; }
+            if (ret < FlightMissionManager.RETURN_ALT_MIN || ret > FlightMissionManager.RETURN_ALT_MAX) {
+                edtReturnAlt.setError(FlightMissionManager.RETURN_ALT_MIN + " – " + FlightMissionManager.RETURN_ALT_MAX + " m");
+                return false;
+            }
             float bat = parseFloat(edtBattery, -1);
             if (bat < 20 || bat > 60) { edtBattery.setError("20 – 60 %"); return false; }
             wpAltitude = alt;
+            wpTransitAlt = transit;
+            wpReturnAlt = Math.round(ret);
+            if (missionManager != null) {
+                missionManager.setTransitAltitude(wpTransitAlt);
+                missionManager.setReturnAltitude(wpReturnAlt);
+            }
             wpSpacing = spacing;
             wpSpeed = speed;
             wpVideo = rbVideo.isChecked();

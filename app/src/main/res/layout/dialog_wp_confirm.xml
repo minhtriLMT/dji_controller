@@ -59,7 +59,7 @@
             android:paddingTop="5dp"
             android:paddingEnd="12dp"
             android:paddingBottom="5dp"
-            android:text="📷  CHỤP ẢNH"
+            android:text="CHỤP ẢNH"
             android:textColor="#69F0AE"
             android:textSize="11sp"
             android:textStyle="bold" />
