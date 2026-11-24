@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000">
@@ -106,6 +107,7 @@
 
     <!-- Tâm ngắm giữa camera -->
     <ImageView
+        android:id="@+id/ivCrosshair"
         android:layout_width="56dp"
         android:layout_height="56dp"
         android:layout_centerInParent="true"
@@ -255,7 +257,38 @@
         <org.maplibre.android.maps.MapView
             android:id="@+id/miniMapView"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            app:maplibre_renderTextureMode="true" />
+
+        <!-- Đổi Bản đồ / Vệ tinh cho mini map -->
+        <ImageButton
+            android:id="@+id/btnMiniMapType"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="4dp"
+            android:background="@drawable/bg_map_fab"
+            android:contentDescription="Đổi bản đồ / vệ tinh"
+            android:padding="5dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_map_layers"
+            app:tint="#FFFFFF" />
+
+        <!-- Về vị trí của tôi (chỉ hiện khi bản đồ toàn màn hình) -->
+        <ImageButton
+            android:id="@+id/btnMiniMapMyLocation"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="106dp"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/bg_map_fab"
+            android:contentDescription="Về vị trí của tôi"
+            android:padding="9dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_map_my_location"
+            android:visibility="gone"
+            app:tint="#69F0AE" />
 
 
         <!-- Tiêu đề phía dưới -->
@@ -270,6 +303,55 @@
             android:textSize="9sp"
             android:textStyle="bold" />
 
+    </FrameLayout>
+
+    <!-- Viền + nhãn cho khung camera thu nhỏ (chỉ hiện khi bản đồ toàn màn hình). Chạm để đổi lại. -->
+    <FrameLayout
+        android:id="@+id/pipFrame"
+        android:layout_width="178dp"
+        android:layout_height="100dp"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentBottom="true"
+        android:layout_margin="8dp"
+        android:background="@drawable/bg_pip_border"
+        android:clickable="true"
+        android:contentDescription="Camera — chạm để phóng to"
+        android:elevation="11dp"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|start"
+            android:layout_margin="5dp"
+            android:background="@drawable/bg_status_chip"
+            android:drawableStart="@drawable/ic_status_dot"
+            android:drawablePadding="4dp"
+            android:drawableTint="#69F0AE"
+            android:gravity="center_vertical"
+            android:paddingStart="6dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="7dp"
+            android:paddingBottom="2dp"
+            android:text="CAMERA"
+            android:textColor="#FFFFFF"
+            android:textSize="9sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="5dp"
+            android:background="@drawable/bg_status_chip"
+            android:paddingStart="6dp"
+            android:paddingTop="2dp"
+            android:paddingEnd="6dp"
+            android:paddingBottom="2dp"
+            android:text="⤢"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp" />
     </FrameLayout>
 
     <!-- Thông số bay dưới giữa: độ cao / tốc độ ngang / tốc độ đứng / cách Home -->

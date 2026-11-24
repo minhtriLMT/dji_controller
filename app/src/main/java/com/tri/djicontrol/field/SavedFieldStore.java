@@ -150,6 +150,18 @@ public final class SavedFieldStore {
         return null;
     }
 
+    /** Được gọi (trên luồng gọi put/delete) mỗi khi danh sách ruộng thay đổi — để bản đồ vẽ lại. */
+    private static Runnable changeListener;
+
+    public static void setOnChangeListener(Runnable listener) {
+        changeListener = listener;
+    }
+
+    private static void notifyChanged() {
+        Runnable l = changeListener;
+        if (l != null) l.run();
+    }
+
     /** Thêm mới hoặc ghi đè theo id. */
     public static synchronized void put(Context ctx, SavedField field) {
         if (field.id == null) {
@@ -160,12 +172,14 @@ public final class SavedFieldStore {
         all.removeIf(f -> f.id.equals(field.id));
         all.add(field);
         save(ctx, all);
+        notifyChanged();
     }
 
     public static synchronized void delete(Context ctx, String id) {
         List<SavedField> all = list(ctx);
         all.removeIf(f -> f.id.equals(id));
         save(ctx, all);
+        notifyChanged();
     }
 
     private static void save(Context ctx, List<SavedField> all) {

@@ -76,22 +76,37 @@ public class FlightMissionManager {
 
     // --- Dừng hẳn rồi mới chụp (ảnh nét, không nhòe do drone đang trôi) ---
     /** Thời gian tối thiểu giữ yên tại điểm chụp trước khi bấm (cho gimbal + thân máy hết rung). */
-    public static final long PHOTO_STABILIZE_MS = 1200;
-    /** Chỉ bấm chụp khi tốc độ ngang còn dưới ngưỡng này (m/s). */
-    private static final double PHOTO_SETTLE_SPEED = 0.3;
+    public static final long PHOTO_STABILIZE_MS = 1000;
+    /** Phải đứng yên LIÊN TỤC bấy nhiêu ms (không chỉ 1 khoảnh khắc chậm lại giữa lúc lắc). */
+    private static final long PHOTO_STABLE_WINDOW_MS = 700;
+    /** Ngưỡng "đứng yên": tốc độ ngang, tốc độ đứng (m/s), độ nghiêng thân (độ), tốc độ xoay mũi (độ/s). */
+    private static final double PHOTO_SETTLE_SPEED = 0.25;
+    private static final double PHOTO_SETTLE_VZ = 0.2;
+    private static final double PHOTO_SETTLE_TILT_DEG = 4.0;
+    private static final double PHOTO_SETTLE_YAW_RATE = 5.0;
     /** Giữ yên tối đa bấy nhiêu ms; quá thì chụp luôn (gió mạnh không đứng yên được). */
-    private static final long PHOTO_MAX_HOLD_MS = 4000;
-    /** Đứng thêm sau khi camera báo chụp xong, rồi mới bay tiếp. */
-    private static final long PHOTO_AFTER_SHOT_MS = 400;
+    private static final long PHOTO_MAX_HOLD_MS = 8000;
+    /**
+     * Đứng thêm sau khi camera nhận lệnh chụp rồi mới bay tiếp. Callback startShootPhoto về khi camera
+     * NHẬN lệnh, lúc đó có thể vẫn đang phơi sáng -> bay đi ngay sẽ nhòe ảnh.
+     */
+    private static final long PHOTO_AFTER_SHOT_MS = 1200;
+    /** Trôi quá điểm chụp xa hơn bấy nhiêu mét mới kéo lại (gần hơn thì đứng yên tại chỗ, đỡ lắc). */
+    private static final double PHOTO_HOLD_PULLBACK_M = 4.0;
+    /** Bay chậm dần khi sắp tới điểm chụp để không phải phanh gấp (m/s tối thiểu). */
+    private static final float PHOTO_APPROACH_MIN_SPEED = 1.0f;
     /** Camera không phản hồi quá lâu thì bỏ qua ảnh này và bay tiếp. */
     private static final long PHOTO_SHOT_TIMEOUT_MS = 5000;
     /** Ước tính tổng thời gian dừng cho 1 ảnh (phanh + ổn định + chụp) — dùng để tính thời gian bay. */
-    public static final double PHOTO_STOP_SECONDS_ESTIMATE = 3.0;
+    public static final double PHOTO_STOP_SECONDS_ESTIMATE = 4.0;
 
     private boolean holding = false, shotFired = false;
     private double holdLat, holdLng;
     private float holdYaw;
     private long holdStartMs, shotFiredMs, holdReleaseAtMs;
+    private long stableSinceMs;          // 0 = chưa đứng yên
+    private double lastYawDeg = Double.NaN;
+    private long lastYawMs;
 
     private FlightController flightController;
     private Camera camera;
@@ -420,7 +435,13 @@ public class FlightMissionManager {
                     return;
                 }
                 LocationCoordinate2D target = waypoints.get(wpIndex);
-                if (flyToward(lat, lng, target, cruiseSpeed, scanAlt, yaw)) {
+                float speedCap = cruiseSpeed;
+                if (!videoMode && !Double.isNaN(lastShotLat)) {
+                    // Còn bao xa tới điểm chụp kế tiếp -> giảm tốc trước để dừng êm, không vọt qua
+                    double remain = photoDistance - GridPlanner.distance(lat, lng, lastShotLat, lastShotLng);
+                    speedCap = (float) Math.min(cruiseSpeed, Math.max(PHOTO_APPROACH_MIN_SPEED, remain * 0.7));
+                }
+                if (flyToward(lat, lng, target, speedCap, scanAlt, yaw)) {
                     wpIndex++;
                     progress();
                 }
@@ -530,6 +551,8 @@ public class FlightMissionManager {
         holdYaw = yaw; // giữ nguyên hướng mũi, không xoay khi chụp
         holdStartMs = System.currentTimeMillis();
         holdReleaseAtMs = 0;
+        stableSinceMs = 0;
+        lastYawDeg = Double.NaN;
         // Ghi nhận điểm chụp ngay để quãng đường tới ảnh sau tính từ đây
         lastShotLat = lat;
         lastShotLng = lng;
@@ -539,16 +562,41 @@ public class FlightMissionManager {
      * Mỗi vòng lặp khi đang dừng chụp: giữ yên -> đợi ổn định -> bấm chụp -> đợi ghi xong -> bay tiếp.
      */
     private void tickPhotoHold(FlightControllerState st, double lat, double lng) {
-        holdAt(lat, lng, new LocationCoordinate2D(holdLat, holdLng), holdYaw, scanAlt);
+        // Đứng yên tại chỗ (DJI tự giữ vị trí bằng GPS khi vận tốc = 0). Chỉ kéo về khi trôi quá xa,
+        // vì vừa phanh xong mà kéo ngược lại thì drone lắc qua lắc lại -> ảnh nhòe.
+        double drift = GridPlanner.distance(lat, lng, holdLat, holdLng);
+        if (drift > PHOTO_HOLD_PULLBACK_M) {
+            holdAt(lat, lng, new LocationCoordinate2D(holdLat, holdLng), holdYaw, scanAlt);
+        } else {
+            send(0, 0, holdYaw, scanAlt);
+        }
         long now = System.currentTimeMillis();
 
         if (!shotFired) {
-            double vx = st.getVelocityX(), vy = st.getVelocityY();
+            double vx = st.getVelocityX(), vy = st.getVelocityY(), vz = st.getVelocityZ();
             double hSpeed = Math.sqrt(vx * vx + vy * vy);
+            double tilt = 0, yawRate = 0;
+            if (st.getAttitude() != null) {
+                tilt = Math.max(Math.abs(st.getAttitude().pitch), Math.abs(st.getAttitude().roll));
+                double yawNow = st.getAttitude().yaw;
+                if (!Double.isNaN(lastYawDeg) && now > lastYawMs) {
+                    double dYaw = Math.abs(((yawNow - lastYawDeg + 540) % 360) - 180);
+                    yawRate = dYaw * 1000.0 / (now - lastYawMs);
+                }
+                lastYawDeg = yawNow;
+                lastYawMs = now;
+            }
+            boolean stillNow = hSpeed < PHOTO_SETTLE_SPEED && Math.abs(vz) < PHOTO_SETTLE_VZ
+                    && tilt < PHOTO_SETTLE_TILT_DEG && yawRate < PHOTO_SETTLE_YAW_RATE;
+            if (!stillNow) stableSinceMs = 0;
+            else if (stableSinceMs == 0) stableSinceMs = now;
+
             long held = now - holdStartMs;
-            boolean stable = held >= PHOTO_STABILIZE_MS && hSpeed < PHOTO_SETTLE_SPEED;
+            boolean stable = held >= PHOTO_STABILIZE_MS && stableSinceMs > 0
+                    && now - stableSinceMs >= PHOTO_STABLE_WINDOW_MS;
             if (stable || held >= PHOTO_MAX_HOLD_MS) {
-                if (!stable) Log.w(TAG, String.format(Locale.US, "Chụp khi chưa đứng yên hẳn (%.2f m/s)", hSpeed));
+                if (!stable) Log.w(TAG, String.format(Locale.US,
+                        "Chụp khi chưa đứng yên hẳn (%.2f m/s, nghiêng %.1f°, xoay %.1f°/s)", hSpeed, tilt, yawRate));
                 fireHoldShot();
             }
             return;

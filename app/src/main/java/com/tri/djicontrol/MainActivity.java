@@ -42,6 +42,7 @@ import android.widget.LinearLayout;
 import android.view.WindowManager;
 import android.app.Dialog;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ProgressBar;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -166,6 +167,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private Runnable videoTimerRunnable;
 
     private View miniMap;
+    private View ivCrosshair;
+    private boolean miniMapSatellite = false;
+    // true = bản đồ toàn màn hình + camera thu nhỏ ở góc; false = camera toàn màn hình + mini map ở góc
+    private boolean mapExpanded = false;
     private MapView miniMapView;
     private MapLibreMap miniMapLibreMap;
     private GeoJsonSource droneSource;
@@ -227,7 +232,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
             miniMapLibreMap.setStyle(
                     new Style.Builder()
-                            .fromUri("asset://osm_style.json"),
+                            .fromUri("asset://minimap_style.json"),
 
                     style -> {
 
@@ -315,25 +320,28 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
                         // RUỘNG + PHẦN ĐÃ BAY + ĐIỂM BẮT ĐẦU (bay quét WP)
                         setupWpMapLayers(style);
+
+                        // TẤT CẢ RUỘNG ĐÃ LƯU (dưới lớp ruộng đang chọn / lộ trình / drone)
+                        refreshSavedFieldsOnMiniMap();
                     }
             );
 
+            // Chạm mini map: phóng bản đồ ra toàn màn hình, camera thu về góc
             miniMapLibreMap.addOnMapClickListener(point -> {
-
-                Intent intent =
-                        new Intent(
-                                MainActivity.this,
-                                MapActivity.class
-                        );
-
-                startActivityForResult(
-                        intent,
-                        REQUEST_FIELD_MAP
-                );
-
-                return true;
+                if (!mapExpanded) {
+                    setMapExpanded(true);
+                    return true;
+                }
+                return false;
             });
+            applyMiniMapUiMode();
         });
+
+        findViewById(R.id.btnMiniMapType).setOnClickListener(v -> toggleMiniMapSatellite());
+        findViewById(R.id.btnMiniMapMyLocation).setOnClickListener(v -> centerMiniMapOnMe());
+        // Lưu / sửa / xóa ruộng ở bất kỳ đâu -> vẽ lại trên mini map
+        com.tri.djicontrol.field.SavedFieldStore.setOnChangeListener(this::refreshSavedFieldsOnMiniMap);
+        ivCrosshair = findViewById(R.id.ivCrosshair);
 
         tvStatus = findViewById(R.id.tvStatus);
         tvGpsAndSdStatus = findViewById(R.id.tvGpsAndSdStatus);
@@ -1281,6 +1289,20 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         // ---------- RETURN TO HOME ----------
         bindGoHomeHeight(d, connected ? aircraft.getFlightController() : null);
 
+        // ---------- TAB Chung / Camera ----------
+        View tabGeneral = d.findViewById(R.id.stTabGeneral);
+        View tabCamera = d.findViewById(R.id.stTabCamera);
+        ((android.widget.RadioGroup) d.findViewById(R.id.rgStTabs)).setOnCheckedChangeListener((g, id) -> {
+            boolean cam = id == R.id.rbStTabCamera;
+            tabGeneral.setVisibility(cam ? View.GONE : View.VISIBLE);
+            tabCamera.setVisibility(cam ? View.VISIBLE : View.GONE);
+        });
+        Camera expCamera = connected ? aircraft.getCamera() : null;
+        bindCameraExposure(d, expCamera);
+        d.setOnDismissListener(x -> {
+            if (expCamera != null) expCamera.setExposureSettingsCallback(null);
+        });
+
         d.show();
         if (d.getWindow() != null) {
             android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
@@ -1289,6 +1311,387 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
                     | WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
         }
+    }
+
+    // =========================================================
+    // MINI MAP: Bản đồ / Vệ tinh + đổi chỗ với khung camera
+    // =========================================================
+    private void toggleMiniMapSatellite() {
+        if (miniMapLibreMap == null || miniMapLibreMap.getStyle() == null) return;
+        miniMapSatellite = !miniMapSatellite;
+        Style style = miniMapLibreMap.getStyle();
+        org.maplibre.android.style.layers.Layer sat = style.getLayer("sat-tiles-layer");
+        org.maplibre.android.style.layers.Layer osm = style.getLayer("osm-tiles-layer");
+        if (sat != null) sat.setProperties(visibility(miniMapSatellite ? VISIBLE : NONE));
+        if (osm != null) osm.setProperties(visibility(miniMapSatellite ? NONE : VISIBLE));
+        ImageButton btn = findViewById(R.id.btnMiniMapType);
+        btn.setImageTintList(android.content.res.ColorStateList.valueOf(miniMapSatellite ? C_GOOD : 0xFFFFFFFF));
+        Toast.makeText(this, miniMapSatellite ? "Bản đồ vệ tinh" : "Bản đồ thường", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Đưa bản đồ về vị trí điện thoại và tiếp tục bám theo khi di chuyển. */
+    private void centerMiniMapOnMe() {
+        if (miniMapLibreMap == null || miniMapLibreMap.getStyle() == null) return;
+        LocationComponent lc = miniMapLibreMap.getLocationComponent();
+        if (!lc.isLocationComponentActivated()) {
+            // Chưa có quyền vị trí -> xin lại (setupPhoneLocationMarker tự hỏi quyền)
+            setupPhoneLocationMarker(miniMapLibreMap.getStyle());
+            return;
+        }
+        Location loc = lc.getLastKnownLocation();
+        if (loc == null) {
+            Toast.makeText(this, "Đang lấy vị trí GPS của điện thoại…", Toast.LENGTH_SHORT).show();
+            lc.setCameraMode(CameraMode.TRACKING);
+            return;
+        }
+        double zoom = Math.max(miniMapLibreMap.getCameraPosition().zoom, 17.0);
+        miniMapLibreMap.animateCamera(org.maplibre.android.camera.CameraUpdateFactory.newLatLngZoom(
+                new LatLng(loc.getLatitude(), loc.getLongitude()), zoom), 600,
+                new MapLibreMap.CancelableCallback() {
+                    @Override public void onCancel() { }
+                    @Override public void onFinish() { lc.setCameraMode(CameraMode.TRACKING); }
+                });
+    }
+
+    /** Đổi chỗ bản đồ và camera. Bản đồ to thì camera thu về góc dưới trái (chạm vào để đổi lại). */
+    private void setMapExpanded(boolean expand) {
+        if (miniMap == null || videoSurface == null) return;
+        mapExpanded = expand;
+        float d = getResources().getDisplayMetrics().density;
+        int margin = Math.round(8 * d);
+
+        android.widget.RelativeLayout.LayoutParams mapLp =
+                (android.widget.RelativeLayout.LayoutParams) miniMap.getLayoutParams();
+        android.widget.RelativeLayout.LayoutParams vidLp =
+                (android.widget.RelativeLayout.LayoutParams) videoSurface.getLayoutParams();
+        if (expand) {
+            mapLp.width = mapLp.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+            mapLp.setMargins(0, 0, 0, 0);
+            // Z âm: bản đồ nằm dưới mọi nút/thanh trạng thái
+            miniMap.setElevation(0f);
+            miniMap.setTranslationZ(-4 * d);
+
+            vidLp.width = Math.round(178 * d);   // 16:9
+            vidLp.height = Math.round(100 * d);
+            vidLp.addRule(android.widget.RelativeLayout.ALIGN_PARENT_START);
+            vidLp.addRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM);
+            vidLp.setMargins(margin, margin, margin, margin);
+            videoSurface.setElevation(10 * d);
+            videoSurface.setOnClickListener(v -> setMapExpanded(false));
+        } else {
+            mapLp.width = Math.round(210 * d);
+            mapLp.height = Math.round(100 * d);
+            mapLp.setMargins(margin, margin, margin, margin);
+            miniMap.setTranslationZ(0f);
+            miniMap.setElevation(10 * d);
+
+            vidLp.width = vidLp.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+            vidLp.removeRule(android.widget.RelativeLayout.ALIGN_PARENT_START);
+            vidLp.removeRule(android.widget.RelativeLayout.ALIGN_PARENT_BOTTOM);
+            vidLp.setMargins(0, 0, 0, 0);
+            videoSurface.setElevation(0f);
+            videoSurface.setOnClickListener(null);
+            videoSurface.setClickable(false);
+        }
+        miniMap.setLayoutParams(mapLp);
+        videoSurface.setLayoutParams(vidLp);
+        // Viền + nhãn CAMERA quanh khung camera thu nhỏ (nằm trên video, nhận chạm để đổi lại)
+        View pipFrame = findViewById(R.id.pipFrame);
+        if (pipFrame != null) {
+            pipFrame.setVisibility(expand ? View.VISIBLE : View.GONE);
+            pipFrame.setOnClickListener(expand ? v -> setMapExpanded(false) : null);
+        }
+        applyMiniMapUiMode();
+        refreshMiniMapTilesAfterResize();
+    }
+
+    /**
+     * Sau khi đổi kích thước khung bản đồ mà camera đứng yên, MapLibre không tính lại các tile cần tải
+     * -> chỉ ô cũ có ảnh. Nhích camera một chút (sau khi layout xong) để nó tải đủ tile cho khung mới.
+     */
+    private void refreshMiniMapTilesAfterResize() {
+        if (miniMapView == null) return;
+        Runnable nudge = () -> {
+            if (miniMapLibreMap == null) return;
+            org.maplibre.android.camera.CameraPosition cp = miniMapLibreMap.getCameraPosition();
+            miniMapLibreMap.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomTo(cp.zoom + 0.001));
+            miniMapLibreMap.moveCamera(org.maplibre.android.camera.CameraUpdateFactory.zoomTo(cp.zoom));
+            miniMapLibreMap.triggerRepaint();
+        };
+        miniMapView.post(nudge);
+        miniMapView.postDelayed(nudge, 350); // lần 2: sau khi GL surface đã đổi kích thước
+    }
+
+    /** Cử chỉ bản đồ + vị trí nút đổi kiểu theo chế độ thu nhỏ / toàn màn hình. */
+    private void applyMiniMapUiMode() {
+        float d = getResources().getDisplayMetrics().density;
+        if (ivCrosshair != null) ivCrosshair.setVisibility(mapExpanded ? View.GONE : View.VISIBLE);
+        View btnMe = findViewById(R.id.btnMiniMapMyLocation);
+        if (btnMe != null) btnMe.setVisibility(mapExpanded ? View.VISIBLE : View.GONE);
+        if (miniMapLibreMap != null) {
+            // Nhãn tên ruộng chỉ hiện khi bản đồ to (mini map nhỏ quá sẽ rối)
+            com.tri.djicontrol.field.SavedFieldsLayer.setLabelsVisible(miniMapLibreMap.getStyle(), mapExpanded);
+        }
+
+        View btn = findViewById(R.id.btnMiniMapType);
+        if (btn != null) {
+            FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) btn.getLayoutParams();
+            int size = Math.round((mapExpanded ? 40 : 28) * d);
+            lp.width = lp.height = size;
+            int m = Math.round(4 * d);
+            // Toàn màn hình: tránh thanh trạng thái (48dp) ở trên
+            lp.setMargins(m, mapExpanded ? Math.round(56 * d) : m, mapExpanded ? Math.round(12 * d) : m, m);
+            btn.setLayoutParams(lp);
+            int pad = Math.round((mapExpanded ? 9 : 5) * d);
+            btn.setPadding(pad, pad, pad, pad);
+        }
+
+        if (miniMapLibreMap != null) {
+            org.maplibre.android.maps.UiSettings ui = miniMapLibreMap.getUiSettings();
+            ui.setScrollGesturesEnabled(mapExpanded);
+            ui.setZoomGesturesEnabled(mapExpanded);
+            ui.setRotateGesturesEnabled(false);
+            ui.setTiltGesturesEnabled(false);
+            ui.setDoubleTapGesturesEnabled(mapExpanded);
+            // Bản đồ to: góc dưới trái là khung camera, giữa dưới là thẻ thông số
+            // -> logo + nút (i) dời sang góc dưới phải, chừa chỗ cho nút thư viện ảnh
+            int bottom = Math.round(4 * d);
+            if (mapExpanded) {
+                int gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
+                ui.setLogoGravity(gravity);
+                ui.setAttributionGravity(gravity);
+                ui.setAttributionMargins(0, 0, Math.round(112 * d), bottom);
+                ui.setLogoMargins(0, 0, Math.round(136 * d), bottom);
+            } else {
+                int gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
+                ui.setLogoGravity(gravity);
+                ui.setAttributionGravity(gravity);
+                ui.setLogoMargins(Math.round(4 * d), 0, 0, bottom);
+                ui.setAttributionMargins(Math.round(96 * d), 0, 0, bottom);
+            }
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (mapExpanded) { setMapExpanded(false); return; }
+        super.onBackPressed();
+    }
+
+    // =========================================================
+    // TAB CAMERA: chế độ phơi sáng, màn trập, ISO, EV
+    // =========================================================
+    /** Màn trập từ chậm -> nhanh (bấm + = nhanh hơn = ít nhòe hơn). */
+    private static final SettingsDefinitions.ShutterSpeed[] SHUTTERS = {
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_30, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_60,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_100, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_120,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_160, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_200,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_240, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_320,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_400, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_500,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_640, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_800,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_1000, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_1250,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_1600, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_2000,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_2500, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_3200,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_4000, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_5000,
+            SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_6400, SettingsDefinitions.ShutterSpeed.SHUTTER_SPEED_1_8000};
+    private static final SettingsDefinitions.ISO[] ISOS = {
+            SettingsDefinitions.ISO.ISO_100, SettingsDefinitions.ISO.ISO_200, SettingsDefinitions.ISO.ISO_400,
+            SettingsDefinitions.ISO.ISO_800, SettingsDefinitions.ISO.ISO_1600, SettingsDefinitions.ISO.ISO_3200};
+    private static final SettingsDefinitions.ExposureCompensation[] EVS = {
+            SettingsDefinitions.ExposureCompensation.N_3_0, SettingsDefinitions.ExposureCompensation.N_2_7,
+            SettingsDefinitions.ExposureCompensation.N_2_3, SettingsDefinitions.ExposureCompensation.N_2_0,
+            SettingsDefinitions.ExposureCompensation.N_1_7, SettingsDefinitions.ExposureCompensation.N_1_3,
+            SettingsDefinitions.ExposureCompensation.N_1_0, SettingsDefinitions.ExposureCompensation.N_0_7,
+            SettingsDefinitions.ExposureCompensation.N_0_3, SettingsDefinitions.ExposureCompensation.N_0_0,
+            SettingsDefinitions.ExposureCompensation.P_0_3, SettingsDefinitions.ExposureCompensation.P_0_7,
+            SettingsDefinitions.ExposureCompensation.P_1_0, SettingsDefinitions.ExposureCompensation.P_1_3,
+            SettingsDefinitions.ExposureCompensation.P_1_7, SettingsDefinitions.ExposureCompensation.P_2_0,
+            SettingsDefinitions.ExposureCompensation.P_2_3, SettingsDefinitions.ExposureCompensation.P_2_7,
+            SettingsDefinitions.ExposureCompensation.P_3_0};
+    private static final int SHUTTER_ANTI_BLUR_INDEX = 12; // 1/1000
+
+    /** "SHUTTER_SPEED_1_1000" -> "1/1000"; "SHUTTER_SPEED_1" -> "1\"" */
+    private static String shutterLabel(SettingsDefinitions.ShutterSpeed s) {
+        if (s == null) return "—";
+        String n = s.name().replace("SHUTTER_SPEED_", "");
+        if (n.startsWith("1_")) return "1/" + n.substring(2).replace("_", ".");
+        return n.replace("_", ".") + "\"";
+    }
+
+    private static String isoLabel(SettingsDefinitions.ISO iso) {
+        if (iso == null) return "—";
+        return iso == SettingsDefinitions.ISO.AUTO ? "Tự động" : iso.name().replace("ISO_", "");
+    }
+
+    /** "N_1_3" -> "−1.3", "P_0_7" -> "+0.7", "N_0_0" -> "0" */
+    private static String evLabel(SettingsDefinitions.ExposureCompensation ev) {
+        if (ev == null || !ev.name().matches("[NP]_\\d_\\d")) return "—";
+        String n = ev.name();
+        String v = n.charAt(2) + "." + n.charAt(4);
+        if (v.equals("0.0")) return "0";
+        return (n.charAt(0) == 'N' ? "−" : "+") + v;
+    }
+
+    private static <T> int indexOf(T[] arr, T v) {
+        for (int i = 0; i < arr.length; i++) if (arr[i] == v) return i;
+        return -1;
+    }
+
+    private void bindCameraExposure(android.app.Dialog d, Camera camera) {
+        android.widget.RadioGroup rgMode = d.findViewById(R.id.rgStExpMode);
+        TextView tvLive = d.findViewById(R.id.tvStExpLive);
+        TextView tvShutter = d.findViewById(R.id.tvStShutter);
+        TextView tvIso = d.findViewById(R.id.tvStIso);
+        TextView tvEv = d.findViewById(R.id.tvStEv);
+        Button btnPreset = d.findViewById(R.id.btnStExpPreset);
+        int[] rows = {R.id.stRowShutter, R.id.stRowIso, R.id.stRowEv};
+
+        // Trạng thái đang hiển thị (index trong mảng; -1 = chưa biết)
+        final int[] shutterIdx = {-1}, isoIdx = {-1}, evIdx = {-1};
+        final boolean[] manual = {false};
+        final boolean[] binding = {false}; // đang cập nhật UI từ camera -> bỏ qua listener
+
+        Runnable render = () -> {
+            tvShutter.setText(shutterIdx[0] >= 0 ? shutterLabel(SHUTTERS[shutterIdx[0]]) : "—");
+            tvIso.setText(isoIdx[0] >= 0 ? isoLabel(ISOS[isoIdx[0]]) : "—");
+            tvEv.setText(evIdx[0] >= 0 ? evLabel(EVS[evIdx[0]]) : "—");
+            boolean on = camera != null;
+            setRowEnabled(d.findViewById(rows[0]), on && manual[0]);
+            setRowEnabled(d.findViewById(rows[1]), on && manual[0]);
+            setRowEnabled(d.findViewById(rows[2]), on && !manual[0]);
+            binding[0] = true;
+            rgMode.check(manual[0] ? R.id.rbStExpManual : R.id.rbStExpAuto);
+            binding[0] = false;
+            // Cảnh báo nếu màn trập thủ công chậm hơn 1/1000 (dễ nhòe khi bay)
+            tvShutter.setTextColor(manual[0] && shutterIdx[0] >= 0 && shutterIdx[0] < SHUTTER_ANTI_BLUR_INDEX
+                    ? C_WARN : 0xFFFFFFFF);
+        };
+
+        if (camera == null) {
+            tvLive.setText("Kết nối drone để chỉnh camera");
+            for (int i = 0; i < rgMode.getChildCount(); i++) rgMode.getChildAt(i).setEnabled(false);
+            btnPreset.setEnabled(false);
+            render.run();
+            return;
+        }
+
+        // Đọc thông số hiện tại từ camera
+        Runnable readAll = () -> {
+            camera.getExposureMode(new CommonCallbacks.CompletionCallbackWith<SettingsDefinitions.ExposureMode>() {
+                @Override public void onSuccess(SettingsDefinitions.ExposureMode m) {
+                    runOnUiThread(() -> { manual[0] = m == SettingsDefinitions.ExposureMode.MANUAL; render.run(); });
+                }
+                @Override public void onFailure(DJIError e) { }
+            });
+            camera.getShutterSpeed(new CommonCallbacks.CompletionCallbackWith<SettingsDefinitions.ShutterSpeed>() {
+                @Override public void onSuccess(SettingsDefinitions.ShutterSpeed v) {
+                    runOnUiThread(() -> { shutterIdx[0] = indexOf(SHUTTERS, v); render.run(); });
+                }
+                @Override public void onFailure(DJIError e) { }
+            });
+            camera.getISO(new CommonCallbacks.CompletionCallbackWith<SettingsDefinitions.ISO>() {
+                @Override public void onSuccess(SettingsDefinitions.ISO v) {
+                    runOnUiThread(() -> { isoIdx[0] = indexOf(ISOS, v); render.run(); });
+                }
+                @Override public void onFailure(DJIError e) { }
+            });
+            camera.getExposureCompensation(new CommonCallbacks.CompletionCallbackWith<SettingsDefinitions.ExposureCompensation>() {
+                @Override public void onSuccess(SettingsDefinitions.ExposureCompensation v) {
+                    runOnUiThread(() -> { evIdx[0] = indexOf(EVS, v); render.run(); });
+                }
+                @Override public void onFailure(DJIError e) { }
+            });
+        };
+        readAll.run();
+
+        // Thông số camera đang thực sự dùng (cả khi tự động)
+        camera.setExposureSettingsCallback(es -> {
+            if (es == null) return;
+            String text = shutterLabel(es.getShutterSpeed()) + " s  ·  ISO " + es.getISO()
+                    + "  ·  EV " + evLabel(es.getExposureCompensation());
+            boolean slow = indexOf(SHUTTERS, es.getShutterSpeed()) >= 0
+                    && indexOf(SHUTTERS, es.getShutterSpeed()) < SHUTTER_ANTI_BLUR_INDEX;
+            runOnUiThread(() -> {
+                tvLive.setText(text);
+                tvLive.setTextColor(slow ? C_WARN : 0xFFFFFFFF);
+            });
+        });
+
+        java.util.function.Consumer<DJIError> onResult = err -> runOnUiThread(() -> {
+            if (err != null) {
+                Toast.makeText(MainActivity.this, "Camera không nhận: " + err.getDescription(), Toast.LENGTH_LONG).show();
+            }
+            readAll.run(); // luôn hiển thị đúng giá trị camera đang giữ
+        });
+
+        rgMode.setOnCheckedChangeListener((g, id) -> {
+            if (binding[0]) return;
+            boolean wantManual = id == R.id.rbStExpManual;
+            manual[0] = wantManual;
+            render.run();
+            camera.setExposureMode(wantManual ? SettingsDefinitions.ExposureMode.MANUAL
+                    : SettingsDefinitions.ExposureMode.PROGRAM, onResult::accept);
+        });
+
+        d.findViewById(R.id.btnStShutterMinus).setOnClickListener(v -> stepShutter(camera, shutterIdx, -1, render, onResult));
+        d.findViewById(R.id.btnStShutterPlus).setOnClickListener(v -> stepShutter(camera, shutterIdx, +1, render, onResult));
+        d.findViewById(R.id.btnStIsoMinus).setOnClickListener(v -> stepIso(camera, isoIdx, -1, render, onResult));
+        d.findViewById(R.id.btnStIsoPlus).setOnClickListener(v -> stepIso(camera, isoIdx, +1, render, onResult));
+        d.findViewById(R.id.btnStEvMinus).setOnClickListener(v -> stepEv(camera, evIdx, -1, render, onResult));
+        d.findViewById(R.id.btnStEvPlus).setOnClickListener(v -> stepEv(camera, evIdx, +1, render, onResult));
+
+        // Chống nhòe: thủ công + 1/1000 s (giữ ISO đang dùng, mặc định 200 nếu chưa biết)
+        btnPreset.setOnClickListener(v -> {
+            btnPreset.setEnabled(false);
+            camera.setExposureMode(SettingsDefinitions.ExposureMode.MANUAL, e1 -> {
+                if (e1 != null) { btnPreset.post(() -> btnPreset.setEnabled(true)); onResult.accept(e1); return; }
+                camera.setShutterSpeed(SHUTTERS[SHUTTER_ANTI_BLUR_INDEX], e2 -> {
+                    if (e2 != null || isoIdx[0] >= 0) {
+                        btnPreset.post(() -> btnPreset.setEnabled(true));
+                        onResult.accept(e2);
+                        if (e2 == null) runOnUiThread(() -> Toast.makeText(this,
+                                "Đã đặt 1/1000 s. Ảnh tối thì tăng ISO.", Toast.LENGTH_LONG).show());
+                        return;
+                    }
+                    camera.setISO(SettingsDefinitions.ISO.ISO_200, e3 -> {
+                        btnPreset.post(() -> btnPreset.setEnabled(true));
+                        onResult.accept(e3);
+                        if (e3 == null) runOnUiThread(() -> Toast.makeText(this,
+                                "Đã đặt 1/1000 s · ISO 200. Ảnh tối thì tăng ISO.", Toast.LENGTH_LONG).show());
+                    });
+                });
+            });
+        });
+        render.run();
+    }
+
+    private static void setRowEnabled(View row, boolean enabled) {
+        if (!(row instanceof android.view.ViewGroup)) return;
+        row.setAlpha(enabled ? 1f : 0.4f);
+        android.view.ViewGroup g = (android.view.ViewGroup) row;
+        for (int i = 0; i < g.getChildCount(); i++) g.getChildAt(i).setEnabled(enabled);
+    }
+
+    private void stepShutter(Camera camera, int[] idx, int dir, Runnable render, java.util.function.Consumer<DJIError> onResult) {
+        int n = idx[0] < 0 ? SHUTTER_ANTI_BLUR_INDEX : Math.max(0, Math.min(SHUTTERS.length - 1, idx[0] + dir));
+        idx[0] = n;
+        render.run();
+        camera.setShutterSpeed(SHUTTERS[n], onResult::accept);
+    }
+
+    private void stepIso(Camera camera, int[] idx, int dir, Runnable render, java.util.function.Consumer<DJIError> onResult) {
+        int n = idx[0] < 0 ? 1 : Math.max(0, Math.min(ISOS.length - 1, idx[0] + dir));
+        idx[0] = n;
+        render.run();
+        camera.setISO(ISOS[n], onResult::accept);
+    }
+
+    private void stepEv(Camera camera, int[] idx, int dir, Runnable render, java.util.function.Consumer<DJIError> onResult) {
+        int n = idx[0] < 0 ? indexOf(EVS, SettingsDefinitions.ExposureCompensation.N_0_0)
+                : Math.max(0, Math.min(EVS.length - 1, idx[0] + dir));
+        idx[0] = n;
+        render.run();
+        camera.setExposureCompensation(EVS[n], onResult::accept);
     }
 
     private static String formatMB(int mb) {
@@ -2328,6 +2731,19 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     /** Ruộng đang chọn có trong danh sách đã lưu (null = ruộng mới chưa lưu). */
     private String currentFieldId = null;
 
+    /** Vẽ lại các ruộng đã lưu trên mini map (bỏ qua ruộng đang chọn vì đã được vẽ riêng). */
+    private void refreshSavedFieldsOnMiniMap() {
+        runOnUiThread(() -> {
+            if (miniMapLibreMap == null || miniMapLibreMap.getStyle() == null) return;
+            Style style = miniMapLibreMap.getStyle();
+            // Chèn dưới lớp ruộng đang chọn (nếu có) để ruộng đang bay luôn nổi lên trên
+            String below = style.getLayer("wp-field-fill") != null ? "wp-field-fill" : FLIGHT_PATH_LAYER_ID;
+            com.tri.djicontrol.field.SavedFieldsLayer.update(this, style,
+                    fieldPoints.size() >= 3 ? currentFieldId : null, below);
+            com.tri.djicontrol.field.SavedFieldsLayer.setLabelsVisible(style, mapExpanded);
+        });
+    }
+
     private void showSaveFieldDialog(Dialog wpDialog) {
         if (fieldPoints.size() != 4) {
             Toast.makeText(this, "Chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
@@ -2368,6 +2784,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             f.updatedAt = System.currentTimeMillis();
             com.tri.djicontrol.field.SavedFieldStore.put(this, f);
             currentFieldId = f.id;
+            refreshSavedFieldsOnMiniMap();
             d.dismiss();
             Toast.makeText(this, "Đã lưu \"" + name + "\"", Toast.LENGTH_SHORT).show();
             // Mở lại hộp thoại WP để cập nhật tên ruộng đang chọn
@@ -2478,6 +2895,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         .setPositiveButton("XÓA", (x, i) -> {
                             com.tri.djicontrol.field.SavedFieldStore.delete(this, f.id);
                             if (f.id.equals(currentFieldId)) currentFieldId = null;
+                            refreshSavedFieldsOnMiniMap();
                             rerender.run();
                         })
                         .setNegativeButton("HỦY", null)
@@ -2487,9 +2905,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     /** Xanh = đã bay xong, vàng = bay dở, xám = chưa bay (dùng chung với bản đồ). */
     static int fieldStatusColor(String status) {
-        if (com.tri.djicontrol.field.SavedFieldStore.STATUS_DONE.equals(status)) return 0xFF69F0AE;
-        if (com.tri.djicontrol.field.SavedFieldStore.STATUS_PARTIAL.equals(status)) return 0xFFFFD54F;
-        return 0xFF9AA0A6;
+        return com.tri.djicontrol.field.SavedFieldsLayer.statusColor(status);
     }
 
     /** Nạp 4 góc + thông số bay của ruộng đã lưu để bay lại. */
@@ -2504,6 +2920,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         wpSpeed = f.speed;
         wpVideo = f.video;
         currentFieldId = f.id;
+        refreshSavedFieldsOnMiniMap();
         if (tvFieldArea != null) tvFieldArea.setText(String.format(Locale.US, "%.2f ha", fieldAreaHa));
         plannedWaypoints = new ArrayList<>();
         drawFieldOnMap();
@@ -2842,6 +3259,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     protected void onResume() {
         super.onResume();
         if (miniMapView != null) miniMapView.onResume();
+        refreshSavedFieldsOnMiniMap(); // có thể vừa sửa ruộng ở màn hình bản đồ
         if (videoSurface != null && videoSurface.isAvailable()) {
             if (codecManager == null) {
                 codecManager = new DJICodecManager(this, videoSurface.getSurfaceTexture(), videoSurface.getWidth(), videoSurface.getHeight());
@@ -2851,6 +3269,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     @Override
     protected void onDestroy() {
+        com.tri.djicontrol.field.SavedFieldStore.setOnChangeListener(null);
         capturePanelHandler.removeCallbacks(capturePanelTicker);
         stopLiveRecording(); // đóng file MP4 đang ghi để không bị hỏng
         if (miniMapView != null) miniMapView.onDestroy();

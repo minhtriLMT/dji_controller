@@ -45,7 +45,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="1dp"
-                android:text="Thẻ nhớ camera và độ cao bay về điểm Home"
+                android:text="Thẻ nhớ, độ cao bay về Home và thông số chụp của camera"
                 android:textColor="#9AA0A6"
                 android:textSize="11sp" />
         </LinearLayout>
@@ -86,6 +86,28 @@
         android:layout_marginBottom="10dp"
         android:background="#1FFFFFFF" />
 
+    <!-- ===== TAB ===== -->
+    <RadioGroup
+        android:id="@+id/rgStTabs"
+        android:layout_width="260dp"
+        android:layout_height="36dp"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_wp_segment"
+        android:orientation="horizontal"
+        android:padding="3dp">
+
+        <RadioButton
+            android:id="@+id/rbStTabGeneral"
+            style="@style/WpSegment"
+            android:checked="true"
+            android:text="Chung" />
+
+        <RadioButton
+            android:id="@+id/rbStTabCamera"
+            style="@style/WpSegment"
+            android:text="Camera" />
+    </RadioGroup>
+
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -93,7 +115,12 @@
         android:fadeScrollbars="true"
         android:scrollbarSize="2dp">
 
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
         <LinearLayout
+            android:id="@+id/stTabGeneral"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:baselineAligned="false"
@@ -350,5 +377,275 @@
                     android:textStyle="bold" />
             </LinearLayout>
         </LinearLayout>
+
+        <!-- ===== TAB CAMERA: PHƠI SÁNG ===== -->
+        <LinearLayout
+            android:id="@+id/stTabCamera"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <!-- Cột trái: chế độ + đang dùng + gợi ý -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/bg_cf_card"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:text="CHẾ ĐỘ PHƠI SÁNG" />
+
+                <RadioGroup
+                    android:id="@+id/rgStExpMode"
+                    android:layout_width="match_parent"
+                    android:layout_height="38dp"
+                    android:background="@drawable/bg_wp_segment"
+                    android:orientation="horizontal"
+                    android:padding="3dp">
+
+                    <RadioButton
+                        android:id="@+id/rbStExpAuto"
+                        style="@style/WpSegment"
+                        android:text="Tự động" />
+
+                    <RadioButton
+                        android:id="@+id/rbStExpManual"
+                        style="@style/WpSegment"
+                        android:text="Thủ công" />
+                </RadioGroup>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Camera đang dùng"
+                    android:textColor="#9AA0A6"
+                    android:textSize="10sp" />
+
+                <TextView
+                    android:id="@+id/tvStExpLive"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:fontFeatureSettings="tnum"
+                    android:text="—"
+                    android:textColor="#FFFFFF"
+                    android:textSize="15sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvStExpHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:background="@drawable/bg_cf_warning"
+                    android:padding="8dp"
+                    android:text="ⓘ Bay quét chụp ảnh nên để màn trập từ 1/1000 s trở lên để ảnh không nhòe. Trời tối thì tăng ISO."
+                    android:textColor="#FFD54F"
+                    android:textSize="10sp" />
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:minHeight="10dp" />
+
+                <androidx.appcompat.widget.AppCompatButton
+                    android:id="@+id/btnStExpPreset"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_cf_btn_fly"
+                    android:minHeight="0dp"
+                    android:stateListAnimator="@null"
+                    android:text="⚡  CHỐNG NHÒE (1/1000 s)"
+                    android:textAllCaps="false"
+                    android:textColor="@color/txt_cf_btn_fly"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Cột phải: màn trập / ISO / EV -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="12dp"
+                android:layout_weight="1"
+                android:background="@drawable/bg_cf_card"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    style="@style/CfSectionTitle"
+                    android:text="THÔNG SỐ" />
+
+                <TextView
+                    style="@style/WpFieldLabel"
+                                        android:text="Tốc độ màn trập (thủ công)" />
+
+                <LinearLayout
+                    android:id="@+id/stRowShutter"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnStShutterMinus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_wp_close"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:padding="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="−"
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:id="@+id/tvStShutter"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="10dp"
+                        android:layout_marginEnd="10dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_wp_input"
+                        android:fontFeatureSettings="tnum"
+                        android:gravity="center"
+                        android:text="—"
+                        android:textColor="#FFFFFF"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnStShutterPlus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_wp_close"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:padding="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="+"
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
+                </LinearLayout>
+
+                <TextView
+                    style="@style/WpFieldLabel"
+                    android:layout_marginTop="8dp"
+                    android:text="ISO (thủ công)" />
+
+                <LinearLayout
+                    android:id="@+id/stRowIso"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnStIsoMinus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_wp_close"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:padding="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="−"
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:id="@+id/tvStIso"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="10dp"
+                        android:layout_marginEnd="10dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_wp_input"
+                        android:fontFeatureSettings="tnum"
+                        android:gravity="center"
+                        android:text="—"
+                        android:textColor="#FFFFFF"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnStIsoPlus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_wp_close"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:padding="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="+"
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
+                </LinearLayout>
+
+                <TextView
+                    style="@style/WpFieldLabel"
+                    android:layout_marginTop="8dp"
+                    android:text="Bù sáng EV (tự động)" />
+
+                <LinearLayout
+                    android:id="@+id/stRowEv"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnStEvMinus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_wp_close"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:padding="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="−"
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
+
+                    <TextView
+                        android:id="@+id/tvStEv"
+                        android:layout_width="0dp"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="10dp"
+                        android:layout_marginEnd="10dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/bg_wp_input"
+                        android:fontFeatureSettings="tnum"
+                        android:gravity="center"
+                        android:text="—"
+                        android:textColor="#FFFFFF"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btnStEvPlus"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="@drawable/bg_wp_close"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:padding="0dp"
+                        android:stateListAnimator="@null"
+                        android:text="+"
+                        android:textColor="#FFFFFF"
+                        android:textSize="20sp" />
+                </LinearLayout>
+
+            </LinearLayout>
+        </LinearLayout>
+        </FrameLayout>
     </ScrollView>
 </LinearLayout>
