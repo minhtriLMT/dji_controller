@@ -1,5 +1,7 @@
 package com.tri.djicontrol;
 
+import com.tri.djicontrol.ui.AppToast;
+
 import android.app.Dialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
@@ -404,7 +406,7 @@ public class StorageAdapter extends BaseAdapter {
             if (thumb != null) {
                 imageView.setImageBitmap(thumb);
             } else {
-                Toast.makeText(context, "Ảnh lỗi hoặc không thể xem trước!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(context, "Ảnh lỗi hoặc không thể xem trước!", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -470,7 +472,7 @@ public class StorageAdapter extends BaseAdapter {
                 return;
             }
 
-            Toast.makeText(context, "Đang tải ảnh gốc về máy...", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(context, "Đang tải ảnh gốc về máy...", Toast.LENGTH_SHORT).show();
             btnDownload.setEnabled(false);
 
             // 2. Dừng hàng đợi thumbnail rồi mới tải file gốc (tránh lỗi drone "bận")
@@ -489,7 +491,7 @@ public class StorageAdapter extends BaseAdapter {
                             main.post(() -> {
                                 btnDownload.setEnabled(true);
                                 if (realFile == null) {
-                                    Toast.makeText(context, "Tải xong nhưng không tìm thấy file trong " + finalDownloadDir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                                    AppToast.makeText(context, "Tải xong nhưng không tìm thấy file trong " + finalDownloadDir.getAbsolutePath(), Toast.LENGTH_LONG).show();
                                     return;
                                 }
                                 downloadedFile[0] = realFile;
@@ -503,7 +505,7 @@ public class StorageAdapter extends BaseAdapter {
                             resumeScheduler();
                             main.post(() -> {
                                 btnDownload.setEnabled(true);
-                                Toast.makeText(context, "Lỗi tải file: " + (djiError != null ? djiError.getDescription() : "Thất bại"), Toast.LENGTH_SHORT).show();
+                                AppToast.makeText(context, "Lỗi tải file: " + (djiError != null ? djiError.getDescription() : "Thất bại"), Toast.LENGTH_SHORT).show();
                             });
                         }
 
@@ -643,7 +645,7 @@ public class StorageAdapter extends BaseAdapter {
                             videoView.start();
                         });
                         videoView.setOnErrorListener((mp, what, extra) -> {
-                            Toast.makeText(context, "Chuyển sang Trình phát Video điện thoại...", Toast.LENGTH_SHORT).show();
+                            AppToast.makeText(context, "Chuyển sang Trình phát Video điện thoại...", Toast.LENGTH_SHORT).show();
                             openSystemVideoPlayer(context, targetFile);
                             return true;
                         });
@@ -660,10 +662,10 @@ public class StorageAdapter extends BaseAdapter {
 
             if (currentFile.exists() && currentFile.length() > 0) {
                 if (currentFile.getAbsolutePath().equals(downloadDest.getAbsolutePath())) {
-                    Toast.makeText(context, "Video đã có sẵn trong DCIM/DJI_Videos!", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(context, "Video đã có sẵn trong DCIM/DJI_Videos!", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                Toast.makeText(context, "Đang lưu video vào DCIM/DJI_Videos...", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(context, "Đang lưu video vào DCIM/DJI_Videos...", Toast.LENGTH_SHORT).show();
                 try (InputStream in = new FileInputStream(currentFile);
                      OutputStream out = new java.io.FileOutputStream(downloadDest)) {
                     byte[] buffer = new byte[16384];
@@ -673,12 +675,12 @@ public class StorageAdapter extends BaseAdapter {
                     }
                     out.flush();
                     MediaScannerConnection.scanFile(context, new String[]{downloadDest.getAbsolutePath()}, new String[]{"video/*"}, null);
-                    Toast.makeText(context, "Đã lưu video vào DCIM/DJI_Videos!", Toast.LENGTH_LONG).show();
+                    AppToast.makeText(context, "Đã lưu video vào DCIM/DJI_Videos!", Toast.LENGTH_LONG).show();
                 } catch (Exception e) {
-                    Toast.makeText(context, "Lỗi lưu video: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(context, "Lỗi lưu video: " + e.getMessage(), Toast.LENGTH_SHORT).show();
                 }
             } else {
-                Toast.makeText(context, "File video chưa nạp xong, vui lòng đợi!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(context, "File video chưa nạp xong, vui lòng đợi!", Toast.LENGTH_SHORT).show();
             }
         };
 
@@ -686,7 +688,7 @@ public class StorageAdapter extends BaseAdapter {
 
         btnVideoFirebase.setOnClickListener(v -> {
             if (isDownloading[0]) {
-                Toast.makeText(context, "Vui lòng đợi nạp xong video từ drone!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(context, "Vui lòng đợi nạp xong video từ drone!", Toast.LENGTH_SHORT).show();
                 return;
             }
             startFirebaseUpload(context, mediaFile, btnVideoFirebase, "Lên Cloud");
@@ -697,7 +699,7 @@ public class StorageAdapter extends BaseAdapter {
             if (currentFile.exists() && currentFile.length() > 0) {
                 openSystemVideoPlayer(context, currentFile);
             } else {
-                Toast.makeText(context, "Vui lòng đợi nạp xong video từ drone!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(context, "Vui lòng đợi nạp xong video từ drone!", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -820,7 +822,7 @@ public class StorageAdapter extends BaseAdapter {
             public void onDone(boolean success, String message) {
                 button.setEnabled(true);
                 button.setText(success ? "ĐÃ LÊN CLOUD ✓" : idleText);
-                Toast.makeText(context, message, Toast.LENGTH_LONG).show();
+                AppToast.makeText(context, message, Toast.LENGTH_LONG).show();
             }
         });
     }
@@ -833,7 +835,7 @@ public class StorageAdapter extends BaseAdapter {
     // Mở bằng Trình phát Video ngoài của hệ điều hành điện thoại
     private void openSystemVideoPlayer(Context context, File videoFile) {
         if (videoFile == null || !videoFile.exists()) {
-            Toast.makeText(context, "File video chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(context, "File video chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
             return;
         }
         try {
@@ -867,7 +869,7 @@ public class StorageAdapter extends BaseAdapter {
 
             context.startActivity(Intent.createChooser(intent, "Mở video bằng..."));
         } catch (Exception e) {
-            Toast.makeText(context, "Lỗi mở trình phát video: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            AppToast.makeText(context, "Lỗi mở trình phát video: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
     }
     private void processAndShowMetadata(Context context, String filePath, boolean forFirebase) {
@@ -903,7 +905,7 @@ public class StorageAdapter extends BaseAdapter {
                         null
                 );
 
-                Toast.makeText(context, "Đã lưu thành công vào Bộ sưu tập điện thoại!", Toast.LENGTH_LONG).show();
+                AppToast.makeText(context, "Đã lưu thành công vào Bộ sưu tập điện thoại!", Toast.LENGTH_LONG).show();
             } else {
                 FirebaseHelper.uploadFileToFirebase(context, sourceFile, metaInfo);
             }

@@ -11,7 +11,9 @@ import dji.common.model.LocationCoordinate2D;
  *
  * - Sắp xếp lại 4 góc theo vòng (người dùng bấm theo thứ tự bất kỳ vẫn đúng).
  * - Các đường quét chạy song song với CẠNH DÀI NHẤT của ruộng -> ít lần quay đầu nhất.
- * - Đường đầu/cuối cách mép ruộng nửa khoảng cách để ảnh phủ sát mép.
+ * - Lề an toàn: thu ruộng vào trong {@code margin} mét ở CẢ 4 cạnh trước khi kẻ đường, nên đường
+ *   ngoài cùng và các điểm quay đầu đều cách bờ đúng {@code margin} (camera nhìn xuống vẫn phủ tới bờ).
+ *   margin = 0: kiểu cũ, đường đầu/cuối cách mép nửa khoảng cách, điểm quay đầu nằm trên bờ.
  */
 public final class GridPlanner {
 
@@ -21,21 +23,36 @@ public final class GridPlanner {
         public final List<LocationCoordinate2D> waypoints;
         public final int lineCount;
         public final double lengthMeters;
+        /** Lề đã áp dụng (m). */
+        public final double margin;
+        /** true khi lề quá lớn so với ruộng (thu vào thì không còn diện tích để bay). */
+        public final boolean marginTooLarge;
 
-        Plan(List<LocationCoordinate2D> waypoints, int lineCount, double lengthMeters) {
+        Plan(List<LocationCoordinate2D> waypoints, int lineCount, double lengthMeters,
+             double margin, boolean marginTooLarge) {
             this.waypoints = waypoints;
             this.lineCount = lineCount;
             this.lengthMeters = lengthMeters;
+            this.margin = margin;
+            this.marginTooLarge = marginTooLarge;
         }
     }
 
     private GridPlanner() {}
 
-    /** @param lats, lngs các góc ruộng (>= 3 điểm), spacing khoảng cách giữa 2 đường bay (m). */
     public static Plan plan(double[] lats, double[] lngs, double spacing) {
+        return plan(lats, lngs, spacing, 0);
+    }
+
+    /**
+     * @param lats, lngs các góc ruộng (>= 3 điểm), spacing khoảng cách giữa 2 đường bay (m),
+     * @param margin lề an toàn cách bờ (m), 0 = không chừa lề.
+     */
+    public static Plan plan(double[] lats, double[] lngs, double spacing, double margin) {
         int n = lats.length;
         List<LocationCoordinate2D> out = new ArrayList<>();
-        if (n < 3 || spacing <= 0) return new Plan(out, 0, 0);
+        margin = Math.max(0, margin);
+        if (n < 3 || spacing <= 0) return new Plan(out, 0, 0, margin, false);
 
         // Gốc tọa độ cục bộ (mét) tại tâm ruộng
         double lat0 = 0, lng0 = 0;
@@ -49,10 +66,17 @@ public final class GridPlanner {
             p[i][1] = (lats[i] - lat0) * M_PER_DEG_LAT; // y = Bắc
         }
 
-        // Sắp góc theo vòng quanh tâm -> đa giác không tự cắt
+        // Sắp góc theo vòng quanh tâm -> đa giác không tự cắt (ngược chiều kim đồng hồ)
         List<double[]> ring = new ArrayList<>();
         Collections.addAll(ring, p);
         ring.sort((a, b) -> Double.compare(Math.atan2(a[1], a[0]), Math.atan2(b[1], b[0])));
+
+        // Thu ruộng vào trong để chừa lề cách bờ
+        if (margin > 0) {
+            List<double[]> inner = inset(ring, margin);
+            if (inner == null) return new Plan(out, 0, 0, margin, true);
+            ring = inner;
+        }
 
         // Hướng cạnh dài nhất
         double bestLen = -1, theta = 0;
@@ -75,14 +99,31 @@ public final class GridPlanner {
         }
 
         double height = maxY - minY;
-        int lines = Math.max(1, (int) Math.ceil(height / spacing));
-        double step = height / lines; // chia đều để 2 mép cách đều nhau, step <= spacing
+        int lines;
+        double[] ys;
+        if (margin > 0) {
+            // Ruộng đã thu vào: đường ngoài cùng nằm ĐÚNG trên mép trong (cách bờ = margin),
+            // các đường giữa chia đều, khoảng cách <= spacing
+            lines = Math.max(1, (int) Math.ceil(height / spacing) + 1);
+            ys = new double[lines];
+            for (int k = 0; k < lines; k++) {
+                ys[k] = lines == 1 ? (minY + maxY) / 2 : minY + height * k / (lines - 1);
+            }
+            // Đẩy nhẹ vào trong để cắt được cạnh (tránh trúng đúng đỉnh)
+            final double eps = 0.02;
+            if (lines > 1) { ys[0] += eps; ys[lines - 1] -= eps; }
+        } else {
+            lines = Math.max(1, (int) Math.ceil(height / spacing));
+            double step = height / lines; // chia đều để 2 mép cách đều nhau, step <= spacing
+            ys = new double[lines];
+            for (int k = 0; k < lines; k++) ys[k] = minY + step * (k + 0.5);
+        }
         boolean leftToRight = true;
         List<double[]> local = new ArrayList<>();
         int lineCount = 0;
 
         for (int k = 0; k < lines; k++) {
-            double y = minY + step * (k + 0.5);
+            double y = ys[k];
             double xMin = Double.MAX_VALUE, xMax = -Double.MAX_VALUE;
             for (int i = 0; i < n; i++) {
                 double[] a = r[i], b = r[(i + 1) % n];
@@ -110,7 +151,61 @@ public final class GridPlanner {
             prev = new double[]{x, y};
             out.add(new LocationCoordinate2D(lat0 + y / M_PER_DEG_LAT, lng0 + x / mPerDegLng));
         }
-        return new Plan(out, lineCount, length);
+        return new Plan(out, lineCount, length, margin, false);
+    }
+
+    /**
+     * Thu đa giác (ngược chiều kim đồng hồ) vào trong d mét: dời mỗi cạnh vào trong d rồi lấy giao điểm
+     * 2 cạnh kề làm đỉnh mới. Trả null nếu thu xong bị lật / quá nhỏ (lề lớn hơn ruộng).
+     */
+    private static List<double[]> inset(List<double[]> ring, double d) {
+        int n = ring.size();
+        double area0 = signedArea(ring);
+        if (Math.abs(area0) < 1e-6) return null;
+        double sign = area0 > 0 ? 1 : -1; // CCW: pháp tuyến trong = quay trái 90°
+        double[][] ptA = new double[n][], dir = new double[n][];
+        for (int i = 0; i < n; i++) {
+            double[] a = ring.get(i), b = ring.get((i + 1) % n);
+            double dx = b[0] - a[0], dy = b[1] - a[1];
+            double len = Math.hypot(dx, dy);
+            if (len < 1e-6) return null;
+            double ux = dx / len, uy = dy / len;
+            double nx = -uy * sign, ny = ux * sign;
+            ptA[i] = new double[]{a[0] + nx * d, a[1] + ny * d};
+            dir[i] = new double[]{ux, uy};
+        }
+        List<double[]> out = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            int prev = (i - 1 + n) % n;
+            double[] hit = intersect(ptA[prev], dir[prev], ptA[i], dir[i]);
+            if (hit == null) return null;
+            out.add(hit);
+        }
+        double area1 = signedArea(out);
+        // Lật chiều hoặc còn dưới 1 m² -> lề quá lớn
+        if (area1 * area0 <= 0 || Math.abs(area1) < 1.0) return null;
+        // Mỗi cạnh mới phải cùng hướng cạnh cũ (không bị đảo khi một cạnh ngắn hơn 2*lề)
+        for (int i = 0; i < n; i++) {
+            double[] a = out.get(i), b = out.get((i + 1) % n);
+            if ((b[0] - a[0]) * dir[i][0] + (b[1] - a[1]) * dir[i][1] <= 0) return null;
+        }
+        return out;
+    }
+
+    private static double[] intersect(double[] p1, double[] d1, double[] p2, double[] d2) {
+        double cross = d1[0] * d2[1] - d1[1] * d2[0];
+        if (Math.abs(cross) < 1e-9) return null; // 2 cạnh song song
+        double t = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / cross;
+        return new double[]{p1[0] + d1[0] * t, p1[1] + d1[1] * t};
+    }
+
+    private static double signedArea(List<double[]> ring) {
+        double s = 0;
+        for (int i = 0; i < ring.size(); i++) {
+            double[] a = ring.get(i), b = ring.get((i + 1) % ring.size());
+            s += a[0] * b[1] - b[0] * a[1];
+        }
+        return s / 2;
     }
 
     /** Khoảng cách 2 tọa độ (m). */

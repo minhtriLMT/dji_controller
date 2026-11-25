@@ -72,7 +72,19 @@ public class FlightMissionManager {
 
     private static final String TAG = "FlightMissionManager";
     private static final long LOOP_MS = 100;              // 10Hz (DJI khuyến nghị 5–25Hz)
-    private static final double ARRIVE_RADIUS = 1.5;      // m
+    private static final double ARRIVE_RADIUS = 1.5;      // m (bay ra / giữ vị trí)
+    /** Bán kính coi là "tới điểm" khi quét: nhỏ để không cắt góc / vọt qua bờ lúc quay đầu. */
+    private static final double SCAN_ARRIVE_RADIUS = 0.8;
+    /** Lệch ngang tối đa vẫn cho chuyển sang đường kế (m); lệch hơn thì kéo về điểm cuối trước. */
+    private static final double SCAN_ARRIVE_MAX_CROSS = 1.2;
+    /** Hệ số kéo về đúng đường: vận tốc ngang (m/s) trên mỗi mét lệch. */
+    private static final double CROSS_TRACK_GAIN = 0.8;
+    /** Vận tốc kéo về đường tối đa (m/s). */
+    private static final double CROSS_TRACK_MAX_SPEED = 1.5;
+    /** Gia tốc phanh dùng để tính tốc độ giảm dần khi tới cuối đường (m/s²). */
+    private static final double SCAN_DECEL = 0.6;
+    /** Tốc độ tối thiểu khi bò tới điểm cuối đường (m/s). */
+    private static final double SCAN_MIN_SPEED = 0.3;
     private static final float TRANSIT_ALT_DEFAULT = 20f; // độ cao bay ra mặc định
     private static final float MAX_TRANSIT_SPEED = 5f;    // m/s
     private static final long MIN_PHOTO_GAP_MS = 2200;    // Mini 2 cần ~2s để ghi 1 ảnh
@@ -95,7 +107,7 @@ public class FlightMissionManager {
      */
     private static final long PHOTO_AFTER_SHOT_MS = 1200;
     /** Trôi quá điểm chụp xa hơn bấy nhiêu mét mới kéo lại (gần hơn thì đứng yên tại chỗ, đỡ lắc). */
-    private static final double PHOTO_HOLD_PULLBACK_M = 4.0;
+    private static final double PHOTO_HOLD_PULLBACK_M = 2.5;
     /** Bay chậm dần khi sắp tới điểm chụp để không phải phanh gấp (m/s tối thiểu). */
     private static final float PHOTO_APPROACH_MIN_SPEED = 1.0f;
     /** Camera không phản hồi quá lâu thì bỏ qua ảnh này và bay tiếp. */
@@ -507,7 +519,8 @@ public class FlightMissionManager {
                     double remain = photoDistance - GridPlanner.distance(lat, lng, lastShotLat, lastShotLng);
                     speedCap = (float) Math.min(cruiseSpeed, Math.max(PHOTO_APPROACH_MIN_SPEED, remain * 0.7));
                 }
-                if (flyToward(lat, lng, target, speedCap, scanAlt, yaw)) {
+                LocationCoordinate2D from = waypoints.get(Math.max(0, wpIndex - 1));
+                if (flyAlong(lat, lng, from, target, speedCap, scanAlt, yaw)) {
                     wpIndex++;
                     progress();
                 }
@@ -536,6 +549,54 @@ public class FlightMissionManager {
         // Chỉ xoay mũi theo hướng bay khi còn xa, gần điểm giữ hướng cũ để khỏi xoay vòng
         float yawCmd = dist > 3 ? (float) bearing : yaw;
         send(vEast, vNorth, yawCmd, altitude);
+        return false;
+    }
+
+    /**
+     * Bay bám ĐÚNG đoạn thẳng from -> to (không chỉ nhắm hướng về điểm): vận tốc dọc đường + vận tốc
+     * ngang kéo về đường khi bị gió đẩy lệch, giảm tốc dần theo quãng còn lại để dừng đúng điểm cuối
+     * (không vọt qua bờ lúc quay đầu). Mũi drone giữ theo hướng đoạn, không lắc theo sai số GPS.
+     * Trả true khi đã tới điểm cuối.
+     */
+    private boolean flyAlong(double lat, double lng, LocationCoordinate2D from, LocationCoordinate2D to,
+                             float maxSpeed, float altitude, float yaw) {
+        // Tọa độ cục bộ (m) gốc tại from: x = Đông, y = Bắc
+        double mLat = 110_574.0;
+        double mLng = 111_320.0 * Math.cos(Math.toRadians(from.getLatitude()));
+        double tx = (to.getLongitude() - from.getLongitude()) * mLng;
+        double ty = (to.getLatitude() - from.getLatitude()) * mLat;
+        double px = (lng - from.getLongitude()) * mLng;
+        double py = (lat - from.getLatitude()) * mLat;
+        double segLen = Math.hypot(tx, ty);
+        if (segLen < 0.5) return flyToward(lat, lng, to, maxSpeed, altitude, yaw);
+
+        double ux = tx / segLen, uy = ty / segLen;          // hướng dọc đường
+        double along = px * ux + py * uy;                   // đã đi được dọc đường
+        double cross = -px * uy + py * ux;                  // lệch ngang (+ = bên trái)
+        double remain = segLen - along;
+        double distToEnd = Math.hypot(tx - px, ty - py);
+        // Giám sát 1 ảnh giữ đúng hướng ảnh cũ; quét thì mũi theo hướng đoạn
+        float segYaw = inspectMode ? yaw : (float) Math.toDegrees(Math.atan2(ux, uy)); // 0 = Bắc, 90 = Đông
+
+        if (distToEnd < SCAN_ARRIVE_RADIUS
+                || (remain < SCAN_ARRIVE_RADIUS && Math.abs(cross) < SCAN_ARRIVE_MAX_CROSS)) {
+            return true;
+        }
+        if (remain < 0) {
+            // Đã vọt qua cuối đường (gió đuôi): quay về đúng điểm cuối rồi mới sang đường kế
+            holdAt(lat, lng, to, segYaw, altitude);
+            return distToEnd < ARRIVE_RADIUS;
+        }
+
+        // Tốc độ dọc đường: giảm dần theo v = sqrt(2·a·s) để dừng êm tại điểm cuối
+        double vAlong = Math.min(maxSpeed, Math.sqrt(2 * SCAN_DECEL * remain));
+        vAlong = Math.max(SCAN_MIN_SPEED, vAlong);
+        // Vận tốc ngang kéo về đường
+        double vCross = Math.max(-CROSS_TRACK_MAX_SPEED, Math.min(CROSS_TRACK_MAX_SPEED, -cross * CROSS_TRACK_GAIN));
+
+        double vEast = ux * vAlong - uy * vCross;
+        double vNorth = uy * vAlong + ux * vCross;
+        send((float) vEast, (float) vNorth, segYaw, altitude);
         return false;
     }
 

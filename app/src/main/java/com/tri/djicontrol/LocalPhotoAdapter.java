@@ -1,5 +1,10 @@
 package com.tri.djicontrol;
 
+import com.tri.djicontrol.ui.AppDialog;
+import com.tri.djicontrol.ui.NoticeStyle;
+
+import com.tri.djicontrol.ui.AppToast;
+
 import android.app.Dialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
@@ -24,7 +29,6 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.appcompat.app.AlertDialog;
 
 import com.tri.djicontrol.firebase.FirebaseHelper;
 
@@ -170,7 +174,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
     /** Lấy danh sách đã chọn rồi thoát chế độ chọn. Trả về null (kèm Toast) nếu chưa chọn gì. */
     private List<File> takeSelection(String actionLabel) {
         if (selectedFiles.isEmpty()) {
-            Toast.makeText(context, "Vui lòng chọn ít nhất 1 file để " + actionLabel + "!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(context, "Vui lòng chọn ít nhất 1 file để " + actionLabel + "!", Toast.LENGTH_SHORT).show();
             return null;
         }
         List<File> list = new ArrayList<>(selectedFiles);
@@ -183,11 +187,12 @@ public class LocalPhotoAdapter extends BaseAdapter {
     // =========================================================
     public void deleteSelected() {
         if (selectedFiles.isEmpty()) {
-            Toast.makeText(context, "Vui lòng chọn ít nhất 1 file để xóa!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(context, "Vui lòng chọn ít nhất 1 file để xóa!", Toast.LENGTH_SHORT).show();
             return;
         }
         int count = selectedFiles.size();
-        new AlertDialog.Builder(context)
+        new AppDialog(context)
+                .setStyle(NoticeStyle.ERROR).setDanger(true).setIcon("🗑")
                 .setTitle("Xác nhận xóa")
                 .setMessage("Bạn có chắc chắn muốn xóa vĩnh viễn " + count + " file đã chọn khỏi điện thoại?")
                 .setPositiveButton("XÓA", (d, i) -> {
@@ -208,7 +213,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
                     }
                     reload();
                     int failed = toDelete.size() - ok;
-                    Toast.makeText(context, failed == 0
+                    AppToast.makeText(context, failed == 0
                             ? "Đã xóa thành công " + ok + " file!"
                             : "Đã xóa " + ok + " file. Thất bại: " + failed + " file", Toast.LENGTH_LONG).show();
                 })
@@ -223,7 +228,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
     public void saveSelectedToGallery() {
         List<File> list = takeSelection("tải về");
         if (list == null) return;
-        Toast.makeText(context, "Đang lưu " + list.size() + " file vào Bộ sưu tập...", Toast.LENGTH_SHORT).show();
+        AppToast.makeText(context, "Đang lưu " + list.size() + " file vào Bộ sưu tập...", Toast.LENGTH_SHORT).show();
         worker.execute(() -> {
             int saved = 0, already = 0, failed = 0;
             for (File f : list) {
@@ -242,7 +247,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
                 if (s > 0) msg.append("Đã lưu ").append(s).append(" file vào Bộ sưu tập. ");
                 if (a > 0) msg.append(a).append(" file đã có sẵn trong Bộ sưu tập. ");
                 if (fl > 0) msg.append("Lỗi: ").append(fl).append(" file.");
-                Toast.makeText(context, msg.toString().trim(), Toast.LENGTH_LONG).show();
+                AppToast.makeText(context, msg.toString().trim(), Toast.LENGTH_LONG).show();
             });
         });
     }
@@ -281,19 +286,19 @@ public class LocalPhotoAdapter extends BaseAdapter {
     // =========================================================
     public void uploadSelectedToCloud() {
         if (!FirebaseHelper.isConfigured(context)) {
-            Toast.makeText(context, "Chưa cấu hình Cloud (CloudConfig.java)!", Toast.LENGTH_LONG).show();
+            AppToast.makeText(context, "Chưa cấu hình Cloud (CloudConfig.java)!", Toast.LENGTH_LONG).show();
             return;
         }
         List<File> list = takeSelection("đẩy lên Cloud");
         if (list == null) return;
-        Toast.makeText(context, "Bắt đầu đẩy " + list.size() + " file lên Cloud...", Toast.LENGTH_SHORT).show();
+        AppToast.makeText(context, "Bắt đầu đẩy " + list.size() + " file lên Cloud...", Toast.LENGTH_SHORT).show();
         uploadAt(list, 0, 0);
     }
 
     private void uploadAt(List<File> list, int index, int okCount) {
         if (index >= list.size()) {
             int failed = list.size() - okCount;
-            Toast.makeText(context, failed == 0
+            AppToast.makeText(context, failed == 0
                     ? "Đã đẩy thành công " + okCount + " file lên Cloud!"
                     : "Đã đẩy " + okCount + " file. Thất bại: " + failed + " file", Toast.LENGTH_LONG).show();
             return;
@@ -416,7 +421,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
         vv.setVideoPath(file.getAbsolutePath());
         vv.setOnPreparedListener(mp -> vv.start());
         vv.setOnErrorListener((mp, what, extra) -> {
-            Toast.makeText(context, "Không phát được video này!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(context, "Không phát được video này!", Toast.LENGTH_SHORT).show();
             return true;
         });
 
@@ -432,7 +437,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
                     main.post(() -> {
                         btnSave.setEnabled(!ok);
                         btnSave.setText(ok ? "Đã lưu ✓" : "Lưu vào máy");
-                        Toast.makeText(context, ok ? "Đã lưu vào DCIM/DJI_Videos!" : "Lỗi lưu video!",
+                        AppToast.makeText(context, ok ? "Đã lưu vào DCIM/DJI_Videos!" : "Lỗi lưu video!",
                                 Toast.LENGTH_SHORT).show();
                     });
                 });
@@ -461,7 +466,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
                         @Override public void onFailure(String message) {
                             btnCloud.setEnabled(true);
                             btnCloud.setText("Lên Cloud");
-                            Toast.makeText(context, "Lỗi Cloud: " + message, Toast.LENGTH_LONG).show();
+                            AppToast.makeText(context, "Lỗi Cloud: " + message, Toast.LENGTH_LONG).show();
                         }
                     });
         });
@@ -504,7 +509,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
             main.post(() -> {
                 loading.setVisibility(View.GONE);
                 if (bmp != null) iv.setImageBitmap(bmp);
-                else Toast.makeText(context, "Không mở được ảnh!", Toast.LENGTH_SHORT).show();
+                else AppToast.makeText(context, "Không mở được ảnh!", Toast.LENGTH_SHORT).show();
             });
         });
     }

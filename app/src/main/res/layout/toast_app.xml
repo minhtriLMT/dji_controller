@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Thông báo nhanh (AppToast): thẻ tối bo góc + icon theo loại, cùng phong cách app -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/appToastRoot"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:elevation="6dp"
+    android:gravity="center_vertical"
+    android:minHeight="40dp"
+    android:orientation="horizontal"
+    android:paddingStart="10dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="8dp">
+
+    <TextView
+        android:id="@+id/tvAppToastIcon"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:gravity="center"
+        android:includeFontPadding="false"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvAppToastMessage"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:maxWidth="400dp"
+        android:maxLines="4"
+        android:ellipsize="end"
+        android:textColor="#E8EAED"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+</LinearLayout>

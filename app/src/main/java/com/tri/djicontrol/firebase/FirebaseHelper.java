@@ -1,5 +1,7 @@
 package com.tri.djicontrol.firebase;
 
+import com.tri.djicontrol.ui.AppToast;
+
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
@@ -50,18 +52,18 @@ public class FirebaseHelper {
 
     /** Bản đơn giản: tự hiện Toast kết quả. */
     public static void uploadFileToFirebase(Context context, File localFile, String metaInfo) {
-        Toast.makeText(context, "Đang đẩy lên Cloud: " + (localFile != null ? localFile.getName() : ""), Toast.LENGTH_SHORT).show();
+        AppToast.makeText(context, "Đang đẩy lên Cloud: " + (localFile != null ? localFile.getName() : ""), Toast.LENGTH_SHORT).show();
         uploadFileToFirebase(context, localFile, metaInfo, new UploadCallback() {
             @Override public void onProgress(int percent, long done, long total) {}
 
             @Override
             public void onSuccess(String downloadUrl) {
-                Toast.makeText(context, "Đã đẩy lên Cloud thành công!", Toast.LENGTH_LONG).show();
+                AppToast.makeText(context, "Đã đẩy lên Cloud thành công!", Toast.LENGTH_LONG).show();
             }
 
             @Override
             public void onFailure(String message) {
-                Toast.makeText(context, "Lỗi Cloud: " + message, Toast.LENGTH_LONG).show();
+                AppToast.makeText(context, "Lỗi Cloud: " + message, Toast.LENGTH_LONG).show();
             }
         });
     }

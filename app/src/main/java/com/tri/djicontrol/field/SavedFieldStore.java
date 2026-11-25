@@ -41,6 +41,7 @@ public final class SavedFieldStore {
         // Thông số bay lần cuối (nạp lại khi chọn ruộng)
         public float altitude = 10f, speed = 3f;
         public double spacing = 5.0;
+        public double margin = 3.0;          // lề an toàn cách bờ (m)
         public boolean video;
         // Cloud
         public String cloudUrl;
@@ -90,6 +91,7 @@ public final class SavedFieldStore {
             o.put("altitude", altitude);
             o.put("speed", speed);
             o.put("spacing", spacing);
+            o.put("margin", margin);
             o.put("video", video);
             if (cloudUrl != null) o.put("cloudUrl", cloudUrl);
             o.put("cloudSyncedAt", cloudSyncedAt);
@@ -116,6 +118,7 @@ public final class SavedFieldStore {
             f.altitude = (float) o.optDouble("altitude", 10);
             f.speed = (float) o.optDouble("speed", 3);
             f.spacing = o.optDouble("spacing", 5);
+            f.margin = o.optDouble("margin", 3);
             f.video = o.optBoolean("video", false);
             f.cloudUrl = o.optString("cloudUrl", null);
             f.cloudSyncedAt = o.optLong("cloudSyncedAt");
@@ -221,6 +224,7 @@ public final class SavedFieldStore {
                     .put("flight_params", new JSONObject()
                             .put("altitude_m", f.altitude)
                             .put("line_spacing_m", f.spacing)
+                            .put("edge_margin_m", f.margin)
                             .put("speed_mps", f.speed)
                             .put("mode", f.video ? "video" : "photo"));
             return new JSONObject()

@@ -1,5 +1,7 @@
 package com.tri.djicontrol;
 
+import com.tri.djicontrol.ui.AppToast;
+
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -137,7 +139,7 @@ public class MapActivity extends AppCompatActivity {
 
             mapLibreMap.addOnMapClickListener(point -> {
                 if (fieldMarkers.size() >= 4) {
-                    Toast.makeText(MapActivity.this, "Đã đủ 4 góc. Kéo các điểm để chỉnh ruộng.", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MapActivity.this, "Đã đủ 4 góc. Kéo các điểm để chỉnh ruộng.", Toast.LENGTH_SHORT).show();
                     return true;
                 }
                 addFieldPoint(point);
@@ -200,12 +202,12 @@ public class MapActivity extends AppCompatActivity {
 
         btnConfirmTarget.setOnClickListener(v -> {
             if (fieldMarkers.size() < 4) {
-                Toast.makeText(MapActivity.this, "Vui lòng chọn đủ 4 góc ruộng!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MapActivity.this, "Vui lòng chọn đủ 4 góc ruộng!", Toast.LENGTH_SHORT).show();
                 return;
             }
             updateFieldPolygon();
             if (currentAreaHa <= 0) {
-                Toast.makeText(MapActivity.this, "Không thể tính diện tích khu vực!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MapActivity.this, "Không thể tính diện tích khu vực!", Toast.LENGTH_SHORT).show();
                 return;
             }
             android.content.Intent resultIntent = new android.content.Intent();

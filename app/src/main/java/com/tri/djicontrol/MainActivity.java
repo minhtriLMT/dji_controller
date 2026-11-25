@@ -1,5 +1,10 @@
 package com.tri.djicontrol;
 
+import com.tri.djicontrol.ui.AppDialog;
+import com.tri.djicontrol.ui.NoticeStyle;
+
+import com.tri.djicontrol.ui.AppToast;
+
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Typeface;
@@ -218,7 +223,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         btnReturnStop.setOnClickListener(v -> {
             if (missionManager != null) {
                 missionManager.startReturnToHome();
-                Toast.makeText(MainActivity.this, "ĐANG THỰC HIỆN RTH!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MainActivity.this, "ĐANG THỰC HIỆN RTH!", Toast.LENGTH_SHORT).show();
             }
         });
 
@@ -417,13 +422,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     btnViewPhotos.setImageResource(R.drawable.ic_storage_play);
                     btnViewPhotos.setContentDescription("Tiếp tục quay");
                     setRecTimerDot(0xFFFFB74D, 255); // cam = đang tạm dừng
-                    Toast.makeText(MainActivity.this, "Đã tạm dừng quay", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Đã tạm dừng quay", Toast.LENGTH_SHORT).show();
                 } else {
                     isVideoPaused = false;
                     videoPausedTime += System.currentTimeMillis() - videoPauseStartTime;
                     btnViewPhotos.setImageResource(R.drawable.ic_storage_pause);
                     btnViewPhotos.setContentDescription("Tạm dừng quay");
-                    Toast.makeText(MainActivity.this, "Tiếp tục quay", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Tiếp tục quay", Toast.LENGTH_SHORT).show();
                     videoTimerHandler.post(videoTimerRunnable);
                 }
             } else {
@@ -435,7 +440,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         btnVideoPhoto.setOnClickListener(v -> {
             if (DJISDKManager.getInstance().getProduct() == null) {
-                Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
                 return;
             }
             Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
@@ -448,7 +453,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     if (djiError == null) {
                         photoCount++;
                         runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "Đã chụp 1 tấm vào thẻ nhớ drone!", Toast.LENGTH_SHORT).show();
+                            AppToast.makeText(MainActivity.this, "Đã chụp 1 tấm vào thẻ nhớ drone!", Toast.LENGTH_SHORT).show();
                         });
                     } else {
                         // Camera không hỗ trợ chụp khi đang quay -> lấy khung hình từ luồng video
@@ -462,14 +467,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     if (djiError == null) {
                         photoCount++;
                         runOnUiThread(() -> {
-                            Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
+                            AppToast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
                         });
                     } else {
                         // Nếu camera báo lỗi do đang ở mode Video, tạm thời chuyển sang mode SHOOT_PHOTO để chụp
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang chụp ảnh...", Toast.LENGTH_SHORT).show());
+                        runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Đang chụp ảnh...", Toast.LENGTH_SHORT).show());
                         camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, setModeErr -> {
                             if (setModeErr != null) {
-                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chuyển chế độ chụp: " + setModeErr.getDescription(), Toast.LENGTH_SHORT).show());
+                                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Lỗi chuyển chế độ chụp: " + setModeErr.getDescription(), Toast.LENGTH_SHORT).show());
                                 return;
                             }
                             // Đợi 500ms cho phần cứng camera sẵn sàng ở chế độ SHOOT_PHOTO
@@ -479,10 +484,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                         if (shootErr == null) {
                                             photoCount++;
                                             runOnUiThread(() -> {
-                                                Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
+                                                AppToast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
                                             });
                                         } else {
-                                            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chụp ảnh: " + shootErr.getDescription(), Toast.LENGTH_SHORT).show());
+                                            runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Lỗi chụp ảnh: " + shootErr.getDescription(), Toast.LENGTH_SHORT).show());
                                         }
                                         // Chờ 1200ms cho máy bay ghi xong file lên thẻ SD rồi chuyển lại mode RECORD_VIDEO
                                         new Handler(Looper.getMainLooper()).postDelayed(() -> {
@@ -697,7 +702,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                                         fc.setHomeLocationUsingAircraftCurrentLocation(djiError -> {
                                             if (djiError == null) {
                                                 isHomePointSet = true;
-                                                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã lưu Home Point!", Toast.LENGTH_LONG).show());
+                                                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Đã lưu Home Point!", Toast.LENGTH_LONG).show());
                                             }
                                         });
                                     }
@@ -837,22 +842,22 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void fetchAndDownloadAllPhotos() {
         if (DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
 
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
         if (camera == null) {
-            Toast.makeText(this, "Không tìm thấy Camera!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Không tìm thấy Camera!", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        Toast.makeText(this, "Đang quét danh sách ảnh từ máy bay...", Toast.LENGTH_SHORT).show();
+        AppToast.makeText(this, "Đang quét danh sách ảnh từ máy bay...", Toast.LENGTH_SHORT).show();
 
         Runnable startDownloadScan = () -> {
             MediaManager mediaManager = camera.getMediaManager();
             if (mediaManager == null) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
                 return;
             }
 
@@ -871,10 +876,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 }
 
                 if (!photoList.isEmpty()) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Tìm thấy " + photoList.size() + " tấm ảnh!", Toast.LENGTH_LONG).show());
+                    runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Tìm thấy " + photoList.size() + " tấm ảnh!", Toast.LENGTH_LONG).show());
                     downloadPhotoListRecursive(camera, photoList, 0);
                 } else {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không tìm thấy file ảnh nào!", Toast.LENGTH_LONG).show());
+                    runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Không tìm thấy file ảnh nào!", Toast.LENGTH_LONG).show());
                 }
             });
         };
@@ -887,7 +892,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void downloadPhotoListRecursive(Camera camera, List<MediaFile> photoList, int index) {
         if (index >= photoList.size()) {
             runOnUiThread(() -> {
-                Toast.makeText(MainActivity.this, "ĐÃ TẢI XONG TOÀN BỘ " + photoList.size() + " ẢNH VỀ ALBUM!", Toast.LENGTH_LONG).show();
+                AppToast.makeText(MainActivity.this, "ĐÃ TẢI XONG TOÀN BỘ " + photoList.size() + " ẢNH VỀ ALBUM!", Toast.LENGTH_LONG).show();
                 camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, null);
             });
             StorageAdapter.resumeScheduler();
@@ -898,7 +903,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         File destDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "DJI_Photos");
         if (!destDir.exists()) destDir.mkdirs();
 
-        runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang tải ảnh (" + (index + 1) + "/" + photoList.size() + "): " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
+        runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Đang tải ảnh (" + (index + 1) + "/" + photoList.size() + "): " + targetMedia.getFileName(), Toast.LENGTH_SHORT).show());
 
         StorageAdapter.suspendScheduler(() -> targetMedia.fetchFileData(destDir, StorageAdapter.baseName(targetMedia.getFileName()), new DownloadListener<String>() {
             @Override
@@ -939,7 +944,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             firebaseBatchStatus = done;
             runOnUiThread(() -> {
                 if (tvSpeedStats != null) tvSpeedStats.setText(done);
-                Toast.makeText(MainActivity.this, done, Toast.LENGTH_LONG).show();
+                AppToast.makeText(MainActivity.this, done, Toast.LENGTH_LONG).show();
             });
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
                 if (done.equals(firebaseBatchStatus)) firebaseBatchStatus = null;
@@ -959,7 +964,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             @Override
             public void onDone(boolean success, String message) {
                 if (!success) {
-                    Toast.makeText(MainActivity.this, prefix + message, Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, prefix + message, Toast.LENGTH_SHORT).show();
                 }
                 uploadBatchToFirebaseRecursive(fileList, index + 1, successCount + (success ? 1 : 0));
             }
@@ -971,7 +976,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (fileList == null || index >= fileList.size()) {
             runOnUiThread(() -> {
                 int total = (fileList != null) ? fileList.size() : 0;
-                Toast.makeText(
+                AppToast.makeText(
                         MainActivity.this,
                         "ĐÃ TẢI XONG TOÀN BỘ " + successCount + "/" + total + " FILE VÀO BỘ SỰ TẬP!",
                         Toast.LENGTH_LONG
@@ -1005,7 +1010,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         final File finalDestDir = destDir;
         final String fileName = mediaFile.getFileName();
 
-        runOnUiThread(() -> Toast.makeText(
+        runOnUiThread(() -> AppToast.makeText(
                 MainActivity.this,
                 "Đang tải (" + (index + 1) + "/" + fileList.size() + "): " + fileName,
                 Toast.LENGTH_SHORT
@@ -1032,7 +1037,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
             @Override
             public void onFailure(DJIError error) {
-                runOnUiThread(() -> Toast.makeText(
+                runOnUiThread(() -> AppToast.makeText(
                         MainActivity.this,
                         "Lỗi tải " + fileName + ": " + (error != null ? error.getDescription() : "Thất bại"),
                         Toast.LENGTH_SHORT
@@ -1076,14 +1081,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             public void onFailure(Call call, IOException e) {
                 uploadSpeedText = "UL: 0 KB/s";
                 updateNetworkSpeedUI();
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Upload thất bại: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Upload thất bại: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 uploadSpeedText = "UL: 0 KB/s";
                 updateNetworkSpeedUI();
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đã upload ảnh lên Server thành công!", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Đã upload ảnh lên Server thành công!", Toast.LENGTH_SHORT).show());
             }
         });
     }
@@ -1218,7 +1223,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void setCameraPhotoMode() {
         if (DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
@@ -1230,7 +1235,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     isRecordingVideo = false;
                     updateCameraModeUI(true, true);
                 } else {
-                    Toast.makeText(MainActivity.this, "Không chuyển được sang chế độ ảnh: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Không chuyển được sang chế độ ảnh: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
                 }
             });
         });
@@ -1238,7 +1243,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void setCameraVideoMode() {
         if (DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
@@ -1250,7 +1255,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     isRecordingVideo = false;
                     updateCameraModeUI(false, true);
                 } else {
-                    Toast.makeText(MainActivity.this, "Không chuyển được sang chế độ quay: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Không chuyển được sang chế độ quay: " + djiError.getDescription(), Toast.LENGTH_SHORT).show();
                 }
             });
         });
@@ -1332,7 +1337,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (osm != null) osm.setProperties(visibility(miniMapSatellite ? NONE : VISIBLE));
         ImageButton btn = findViewById(R.id.btnMiniMapType);
         btn.setImageTintList(android.content.res.ColorStateList.valueOf(miniMapSatellite ? C_GOOD : 0xFFFFFFFF));
-        Toast.makeText(this, miniMapSatellite ? "Bản đồ vệ tinh" : "Bản đồ thường", Toast.LENGTH_SHORT).show();
+        AppToast.makeText(this, miniMapSatellite ? "Bản đồ vệ tinh" : "Bản đồ thường", Toast.LENGTH_SHORT).show();
     }
 
     /** Đưa bản đồ về vị trí điện thoại và tiếp tục bám theo khi di chuyển. */
@@ -1346,7 +1351,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         }
         Location loc = lc.getLastKnownLocation();
         if (loc == null) {
-            Toast.makeText(this, "Đang lấy vị trí GPS của điện thoại…", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Đang lấy vị trí GPS của điện thoại…", Toast.LENGTH_SHORT).show();
             lc.setCameraMode(CameraMode.TRACKING);
             return;
         }
@@ -1625,7 +1630,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         java.util.function.Consumer<DJIError> onResult = err -> runOnUiThread(() -> {
             if (err != null) {
-                Toast.makeText(MainActivity.this, "Camera không nhận: " + err.getDescription(), Toast.LENGTH_LONG).show();
+                AppToast.makeText(MainActivity.this, "Camera không nhận: " + err.getDescription(), Toast.LENGTH_LONG).show();
             }
             readAll.run(); // luôn hiển thị đúng giá trị camera đang giữ
         });
@@ -1655,14 +1660,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     if (e2 != null || isoIdx[0] >= 0) {
                         btnPreset.post(() -> btnPreset.setEnabled(true));
                         onResult.accept(e2);
-                        if (e2 == null) runOnUiThread(() -> Toast.makeText(this,
+                        if (e2 == null) runOnUiThread(() -> AppToast.makeText(this,
                                 "Đã đặt 1/1000 s. Ảnh tối thì tăng ISO.", Toast.LENGTH_LONG).show());
                         return;
                     }
                     camera.setISO(SettingsDefinitions.ISO.ISO_200, e3 -> {
                         btnPreset.post(() -> btnPreset.setEnabled(true));
                         onResult.accept(e3);
-                        if (e3 == null) runOnUiThread(() -> Toast.makeText(this,
+                        if (e3 == null) runOnUiThread(() -> AppToast.makeText(this,
                                 "Đã đặt 1/1000 s · ISO 200. Ảnh tối thì tăng ISO.", Toast.LENGTH_LONG).show());
                     });
                 });
@@ -1837,9 +1842,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 if (djiError == null) {
                     droneValue[0] = h;
                     tvCurrent.setText("Đang lưu trên drone: " + h + " m");
-                    Toast.makeText(MainActivity.this, "Đã đặt độ cao RTH: " + h + " m", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Đã đặt độ cao RTH: " + h + " m", Toast.LENGTH_SHORT).show();
                 } else {
-                    Toast.makeText(MainActivity.this, "Lỗi đặt độ cao RTH: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                    AppToast.makeText(MainActivity.this, "Lỗi đặt độ cao RTH: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
                 }
                 updateSave.run();
             }));
@@ -1886,21 +1891,21 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void formatSDCard(java.util.function.Consumer<Boolean> onDone) {
         if (!(DJISDKManager.getInstance().getProduct() instanceof Aircraft)) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             if (onDone != null) onDone.accept(false);
             return;
         }
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
         if (camera == null) {
-            Toast.makeText(this, "Không tìm thấy Camera/Thẻ nhớ!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Không tìm thấy Camera/Thẻ nhớ!", Toast.LENGTH_SHORT).show();
             if (onDone != null) onDone.accept(false);
             return;
         }
         camera.formatStorage(SettingsDefinitions.StorageLocation.SDCARD, djiError -> runOnUiThread(() -> {
             if (djiError == null) {
-                Toast.makeText(MainActivity.this, "Format thẻ nhớ THÀNH CÔNG!", Toast.LENGTH_LONG).show();
+                AppToast.makeText(MainActivity.this, "Format thẻ nhớ THÀNH CÔNG!", Toast.LENGTH_LONG).show();
             } else {
-                Toast.makeText(MainActivity.this, "Lỗi format: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                AppToast.makeText(MainActivity.this, "Lỗi format: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
             }
             if (onDone != null) onDone.accept(djiError == null);
         }));
@@ -1908,7 +1913,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void triggerManualCapture() {
         if (DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
         Camera camera = ((Aircraft) DJISDKManager.getInstance().getProduct()).getCamera();
@@ -1919,10 +1924,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 if (djiError == null) {
                     photoCount++;
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
+                        AppToast.makeText(MainActivity.this, "Đã chụp 1 tấm!", Toast.LENGTH_SHORT).show();
                     });
                 } else {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi chụp: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
+                    runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Lỗi chụp: " + djiError.getDescription(), Toast.LENGTH_LONG).show());
                 }
             });
             return;
@@ -1939,9 +1944,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         btnViewPhotos.setContentDescription("Tạm dừng quay");
                         btnCaptureManual.setSelected(true);
                         btnCaptureManual.setContentDescription("Dừng quay");
-                        Toast.makeText(MainActivity.this, "Bắt đầu quay Video!", Toast.LENGTH_SHORT).show();
+                        AppToast.makeText(MainActivity.this, "Bắt đầu quay Video!", Toast.LENGTH_SHORT).show();
                     } else {
-                        Toast.makeText(MainActivity.this, "Lỗi quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                        AppToast.makeText(MainActivity.this, "Lỗi quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
                     }
                 });
             });
@@ -1956,9 +1961,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         btnCaptureManual.setContentDescription("Quay video");
                         btnViewPhotos.setImageResource(R.drawable.ic_storage_gallery);
                         btnViewPhotos.setContentDescription("Mở kho lưu trữ");
-                        Toast.makeText(MainActivity.this, "Đã lưu Video vào thẻ nhớ!", Toast.LENGTH_SHORT).show();
+                        AppToast.makeText(MainActivity.this, "Đã lưu Video vào thẻ nhớ!", Toast.LENGTH_SHORT).show();
                     } else {
-                        Toast.makeText(MainActivity.this, "Lỗi dừng quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
+                        AppToast.makeText(MainActivity.this, "Lỗi dừng quay: " + djiError.getDescription(), Toast.LENGTH_LONG).show();
                     }
                 });
             });
@@ -2170,12 +2175,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         r.stop((file, durationMs, error) -> {
             if (isFinishing() || isDestroyed()) return;
             if (file != null) {
-                Toast.makeText(MainActivity.this, String.format(Locale.US,
+                AppToast.makeText(MainActivity.this, String.format(Locale.US,
                         "Đã lưu bản xem nhanh (%s) • Xem ở Lưu trữ > Trên điện thoại",
                         formatDuration(durationMs)), Toast.LENGTH_LONG).show();
             } else {
                 android.util.Log.w("LiveRec", "Không ghi được bản xem nhanh: " + error);
-                Toast.makeText(MainActivity.this, "Không ghi được bản xem nhanh: " + error,
+                AppToast.makeText(MainActivity.this, "Không ghi được bản xem nhanh: " + error,
                         Toast.LENGTH_LONG).show();
             }
         });
@@ -2198,6 +2203,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private float wpTransitAlt = 20f;   // độ cao bay ra (tới ruộng)
     private int wpReturnAlt = 30;       // độ cao bay về Home
     private double wpSpacing = 5.0;
+    private double wpMargin = 3.0;      // lề an toàn: đường bay cách bờ ruộng (m)
     private float wpSpeed = 3f;
     private boolean wpVideo = false;
     /** Chụp ảnh WP: true = vừa bay vừa đẩy ảnh lên Cloud, false = chỉ lưu thẻ nhớ. */
@@ -2467,8 +2473,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         StringBuilder sb = new StringBuilder();
         sb.append(String.format(Locale.US, "Lộ trình: %d đường bay, %d điểm, dài %.0f m\n",
                 plan.lineCount, plan.waypoints.size(), plan.lengthMeters));
-        sb.append(String.format(Locale.US, "Độ cao %.0f m • cách %.1f m • tốc độ %.1f m/s\n",
-                wpAltitude, wpSpacing, speed));
+        sb.append(String.format(Locale.US, "Độ cao %.0f m • cách %.1f m • lề bờ %.1f m • tốc độ %.1f m/s\n",
+                wpAltitude, wpSpacing, wpMargin, speed));
         sb.append(String.format(Locale.US, "Thời gian quét ≈ %.1f phút", minutes));
         if (!wpVideo) {
             sb.append(String.format(Locale.US, " • ≈ %d ảnh (mỗi %.1f m, dừng ~%.0f s/ảnh)",
@@ -2488,7 +2494,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             lats[i] = fieldPoints.get(i).getLatitude();
             lngs[i] = fieldPoints.get(i).getLongitude();
         }
-        GridPlanner.Plan plan = GridPlanner.plan(lats, lngs, wpSpacing);
+        GridPlanner.Plan plan = GridPlanner.plan(lats, lngs, wpSpacing, wpMargin);
         List<LocationCoordinate2D> wps = new ArrayList<>(plan.waypoints);
 
         // Bắt đầu từ đầu lộ trình gần drone hơn để đỡ bay vòng
@@ -2560,6 +2566,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         edtTransitAlt.setText(String.format(Locale.US, "%.0f", wpTransitAlt));
         edtReturnAlt.setText(String.valueOf(wpReturnAlt));
         edtSpacing.setText(String.format(Locale.US, "%.1f", wpSpacing));
+        EditText edtMargin = dialog.findViewById(R.id.edtWPMargin);
+        edtMargin.setText(String.format(Locale.US, "%.1f", wpMargin));
         edtSpeed.setText(String.format(Locale.US, "%.1f", wpSpeed));
         if (wpVideo) rbVideo.setChecked(true); else rbPhoto.setChecked(true);
         if (wpCloudUpload) rbSaveCloud.setChecked(true); else rbSaveCard.setChecked(true);
@@ -2594,6 +2602,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             float speed = parseFloat(edtSpeed, -1);
             if (alt < 0 || alt > 120) { edtAlt.setError("0 – 120 m"); return false; }
             if (spacing < 1 || spacing > 100) { edtSpacing.setError("1 – 100 m"); return false; }
+            float margin = parseFloat(edtMargin, -1);
+            if (margin < 0 || margin > 20) { edtMargin.setError("0 – 20 m"); return false; }
             if (speed < 0.5f || speed > 10) { edtSpeed.setError("0.5 – 10 m/s"); return false; }
             float transit = parseFloat(edtTransitAlt, -1);
             float ret = parseFloat(edtReturnAlt, -1);
@@ -2612,6 +2622,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 missionManager.setReturnAltitude(wpReturnAlt);
             }
             wpSpacing = spacing;
+            wpMargin = margin;
             wpSpeed = speed;
             wpVideo = rbVideo.isChecked();
             wpCloudUpload = rbSaveCloud.isChecked();
@@ -2639,12 +2650,20 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         Runnable buildPlan = () -> {
             if (fieldPoints.size() != 4) {
-                Toast.makeText(MainActivity.this, "Vui lòng chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MainActivity.this, "Vui lòng chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
                 return;
             }
             if (!readParams.getAsBoolean()) return;
             GridPlanner.Plan plan = createPlan();
             lastWpPlan = plan;
+            if (plan.marginTooLarge) {
+                tvEstimate.setText(String.format(Locale.US,
+                        "Lề cách bờ %.1f m quá lớn so với ruộng này — giảm lề rồi tạo lại.", wpMargin));
+                edtMargin.setError("Lề quá lớn");
+                plannedWaypoints = new ArrayList<>();
+                drawPlanOnMap(false);
+                return;
+            }
             if (plannedWaypoints.size() < 2) {
                 tvEstimate.setText("Không tạo được lộ trình. Khoảng cách đường bay quá lớn so với ruộng?");
                 drawPlanOnMap(false);
@@ -2664,7 +2683,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         btnStart.setOnClickListener(v -> {
             if (missionManager == null || DJISDKManager.getInstance().getProduct() == null) {
-                Toast.makeText(MainActivity.this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MainActivity.this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
                 return;
             }
             buildPlan.run(); // luôn tạo lại theo thông số mới nhất
@@ -2682,7 +2701,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         btnStop.setOnClickListener(v -> {
             if (missionManager != null) missionManager.stopAndReturnHome();
-            Toast.makeText(MainActivity.this, "Đã dừng nhiệm vụ, drone bay về nhà", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(MainActivity.this, "Đã dừng nhiệm vụ, drone bay về nhà", Toast.LENGTH_SHORT).show();
         });
 
         btnCloseWP.setOnClickListener(view -> dialog.dismiss());
@@ -2740,6 +2759,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 if (mid != null && !f.missionIds.contains(mid)) f.missionIds.add(mid);
                 f.altitude = wpAltitude;
                 f.spacing = wpSpacing;
+                f.margin = wpMargin;
                 f.speed = wpSpeed;
                 f.video = wpVideo;
                 f.lastFlownAt = System.currentTimeMillis();
@@ -2773,7 +2793,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void showSaveFieldDialog(Dialog wpDialog) {
         if (fieldPoints.size() != 4) {
-            Toast.makeText(this, "Chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chọn đủ 4 góc ruộng trước!", Toast.LENGTH_SHORT).show();
             return;
         }
         com.tri.djicontrol.field.SavedFieldStore.SavedField existing =
@@ -2806,6 +2826,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             f.areaHa = fieldAreaHa;
             f.altitude = wpAltitude;
             f.spacing = wpSpacing;
+            f.margin = wpMargin;
             f.speed = wpSpeed;
             f.video = wpVideo;
             f.updatedAt = System.currentTimeMillis();
@@ -2813,7 +2834,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             currentFieldId = f.id;
             refreshSavedFieldsOnMiniMap();
             d.dismiss();
-            Toast.makeText(this, "Đã lưu \"" + name + "\"", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Đã lưu \"" + name + "\"", Toast.LENGTH_SHORT).show();
             // Mở lại hộp thoại WP để cập nhật tên ruộng đang chọn
             if (wpDialog != null) wpDialog.dismiss();
             openWPDialog();
@@ -2921,7 +2942,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         });
 
         row.findViewById(R.id.btnFieldDelete).setOnClickListener(v ->
-                new androidx.appcompat.app.AlertDialog.Builder(this)
+                new AppDialog(this)
+                        .setStyle(NoticeStyle.ERROR).setDanger(true).setIcon("🗑")
                         .setTitle("Xóa \"" + f.name + "\"?")
                         .setMessage("Mảnh ruộng sẽ bị xóa khỏi danh sách trên điện thoại "
                                 + "(dữ liệu đã đẩy lên Cloud vẫn còn).")
@@ -3110,16 +3132,17 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void confirmInspectPhoto(com.tri.djicontrol.field.SavedFieldStore.SavedField field,
                                      com.tri.djicontrol.field.FieldPhotoIndex.Photo p, android.app.Dialog photosDialog) {
         if (missionManager == null) {
-            Toast.makeText(this, "Chưa kết nối drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối drone!", Toast.LENGTH_SHORT).show();
             return;
         }
         if (missionManager.isRunning()) {
-            Toast.makeText(this, "Đang có nhiệm vụ bay khác!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Đang có nhiệm vụ bay khác!", Toast.LENGTH_SHORT).show();
             return;
         }
         float alt = Float.isNaN(p.relAlt) ? field.altitude : p.relAlt;
         float transit = Math.max(alt, wpTransitAlt);
-        new androidx.appcompat.app.AlertDialog.Builder(this)
+        new AppDialog(this)
+                .setStyle(NoticeStyle.SUCCESS).setIcon("✈")
                 .setTitle("Bay giám sát ảnh này?")
                 .setMessage(String.format(Locale.US,
                         "Drone sẽ:\n• Cất cánh (nếu đang ở đất) và lên %.0f m\n• Bay tới %.6f, %.6f\n"
@@ -3151,7 +3174,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             public void onFinished(boolean completed, String message) {
                 setWpStatus("Giám sát: " + message);
                 if (activeWpStopButton != null) activeWpStopButton.setVisibility(View.GONE);
-                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                new AppDialog(MainActivity.this)
+                        .setStyle(completed ? NoticeStyle.SUCCESS : NoticeStyle.WARNING)
                         .setTitle(completed ? "Đã chụp lại ảnh giám sát" : "Giám sát đã dừng")
                         .setMessage(message + (completed
                                 ? "\n\nẢnh mới đã lưu vào thẻ nhớ và có trong tab ảnh của ruộng \"" + field.name + "\"."
@@ -3177,6 +3201,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         fieldAreaHa = f.areaHa;
         wpAltitude = f.altitude;
         wpSpacing = f.spacing;
+        wpMargin = f.margin;
         wpSpeed = f.speed;
         wpVideo = f.video;
         currentFieldId = f.id;
@@ -3185,7 +3210,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         plannedWaypoints = new ArrayList<>();
         drawFieldOnMap();
         drawPlanOnMap(false);
-        Toast.makeText(this, "Đã chọn \"" + f.name + "\"", Toast.LENGTH_SHORT).show();
+        AppToast.makeText(this, "Đã chọn \"" + f.name + "\"", Toast.LENGTH_SHORT).show();
     }
 
     /** Đẩy GeoJSON của 1 ruộng lên Cloudinary. */
@@ -3208,13 +3233,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             cur.cloudSyncedAt = Math.max(System.currentTimeMillis(), cur.updatedAt);
                             com.tri.djicontrol.field.SavedFieldStore.put(MainActivity.this, cur);
                         }
-                        Toast.makeText(MainActivity.this, "Đã đẩy \"" + f.name + "\" lên Cloud", Toast.LENGTH_SHORT).show();
+                        AppToast.makeText(MainActivity.this, "Đã đẩy \"" + f.name + "\" lên Cloud", Toast.LENGTH_SHORT).show();
                         done.accept(true);
                     }
 
                     @Override
                     public void onFailure(String message) {
-                        Toast.makeText(MainActivity.this, "Lỗi Cloud (" + f.name + "): " + message, Toast.LENGTH_LONG).show();
+                        AppToast.makeText(MainActivity.this, "Lỗi Cloud (" + f.name + "): " + message, Toast.LENGTH_LONG).show();
                         done.accept(false);
                     }
                 });
@@ -3223,7 +3248,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void uploadFieldsSequential(List<com.tri.djicontrol.field.SavedFieldStore.SavedField> list,
                                         int i, int ok, Button btn, Runnable rerender) {
         if (i >= list.size()) {
-            Toast.makeText(this, "Đã đẩy " + ok + "/" + list.size() + " ruộng lên Cloud", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Đã đẩy " + ok + "/" + list.size() + " ruộng lên Cloud", Toast.LENGTH_SHORT).show();
             rerender.run();
             return;
         }
@@ -3251,11 +3276,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     /** Bay tiếp nhiệm vụ đang dở (sau khi thay pin). */
     private void resumeWpMission(com.tri.djicontrol.flight.MissionCheckpoint cp) {
         if (missionManager == null || DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Chưa kết nối Drone!", Toast.LENGTH_SHORT).show();
             return;
         }
         if (missionManager.isRunning()) {
-            Toast.makeText(this, "Nhiệm vụ đang chạy!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Nhiệm vụ đang chạy!", Toast.LENGTH_SHORT).show();
             return;
         }
         // Hiện lại lộ trình gốc + phần đã quét trên bản đồ
@@ -3273,7 +3298,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         missionManager.setLowBatteryThreshold(wpLowBattery);
         missionManager.setCloudUpload(wpCloudUpload);
         missionManager.resumeMission(cp, createWpListener(cp.video));
-        Toast.makeText(this, "Bay tiếp nhiệm vụ từ " + cp.progressPercent() + "%", Toast.LENGTH_SHORT).show();
+        AppToast.makeText(this, "Bay tiếp nhiệm vụ từ " + cp.progressPercent() + "%", Toast.LENGTH_SHORT).show();
     }
 
     private FlightMissionManager.MissionListener createWpListener(final boolean video) {
@@ -3330,7 +3355,9 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         if (activeWpStopButton != null) activeWpStopButton.setVisibility(View.GONE);
                         boolean paused = !completed
                                 && com.tri.djicontrol.flight.MissionCheckpoint.load(MainActivity.this) != null;
-                        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                        new AppDialog(MainActivity.this)
+                                .setStyle(completed ? NoticeStyle.SUCCESS : NoticeStyle.WARNING)
+                                .setIcon(completed ? "✓" : paused ? "Ⅱ" : "!")
                                 .setTitle(completed ? "Hoàn thành bay quét"
                                         : paused ? "Tạm dừng — đã lưu tiến độ" : "Nhiệm vụ đã dừng")
                                 .setMessage(message + (completed
@@ -3403,7 +3430,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         });
         d.findViewById(R.id.btnResumeLater).setOnClickListener(v -> d.dismiss());
         d.findViewById(R.id.btnResumeDiscard).setOnClickListener(v ->
-                new androidx.appcompat.app.AlertDialog.Builder(this)
+                new AppDialog(this)
+                        .setStyle(NoticeStyle.ERROR).setDanger(true)
                         .setTitle("Hủy nhiệm vụ đang dở?")
                         .setMessage("Tiến độ " + pct + "% sẽ bị xóa, không thể bay tiếp được nữa.")
                         .setPositiveButton("HỦY NHIỆM VỤ", (x, i) -> {
@@ -3718,7 +3746,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
             } else {
 
-                Toast.makeText(
+                AppToast.makeText(
                         MainActivity.this,
                         "Ứng dụng chưa được cấp quyền vị trí",
                         Toast.LENGTH_SHORT
@@ -3891,7 +3919,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 }
                 Set<MediaFile> selected = adapter.getSelectedFiles();
                 if (selected.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để tải về!", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để tải về!", Toast.LENGTH_SHORT).show();
                     return;
                 }
 
@@ -3899,7 +3927,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 adapter.clearSelection();
                 adapter.setSelectionMode(false);
 
-                Toast.makeText(MainActivity.this, "Bắt đầu tải " + toDownload.size() + " file về Bộ sưu tập...", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MainActivity.this, "Bắt đầu tải " + toDownload.size() + " file về Bộ sưu tập...", Toast.LENGTH_SHORT).show();
                 downloadBatchSelectedFilesRecursive(toDownload, 0, 0);
             });
         }
@@ -3912,11 +3940,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 }
                 Set<MediaFile> selected = adapter.getSelectedFiles();
                 if (selected.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để đẩy lên Cloud!", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để đẩy lên Cloud!", Toast.LENGTH_SHORT).show();
                     return;
                 }
                 if (!com.tri.djicontrol.firebase.FirebaseHelper.isConfigured(MainActivity.this)) {
-                    Toast.makeText(MainActivity.this, "Chưa cấu hình Cloud (CloudConfig.java)!", Toast.LENGTH_LONG).show();
+                    AppToast.makeText(MainActivity.this, "Chưa cấu hình Cloud (CloudConfig.java)!", Toast.LENGTH_LONG).show();
                     return;
                 }
 
@@ -3924,7 +3952,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 adapter.clearSelection();
                 adapter.setSelectionMode(false);
 
-                Toast.makeText(MainActivity.this, "Bắt đầu đẩy " + toUpload.size() + " file lên Cloud...", Toast.LENGTH_SHORT).show();
+                AppToast.makeText(MainActivity.this, "Bắt đầu đẩy " + toUpload.size() + " file lên Cloud...", Toast.LENGTH_SHORT).show();
                 uploadBatchToFirebaseRecursive(toUpload, 0, 0);
             });
         }
@@ -3937,17 +3965,18 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 }
                 Set<MediaFile> selected = adapter.getSelectedFiles();
                 if (selected.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để xóa!", Toast.LENGTH_SHORT).show();
+                    AppToast.makeText(MainActivity.this, "Vui lòng chọn ít nhất 1 file để xóa!", Toast.LENGTH_SHORT).show();
                     return;
                 }
 
-                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                new AppDialog(MainActivity.this)
+                        .setStyle(NoticeStyle.ERROR).setDanger(true).setIcon("🗑")
                         .setTitle("Xác nhận xóa")
                         .setMessage("Bạn có chắc chắn muốn xóa " + selected.size() + " file đã chọn khỏi máy bay?")
                         .setPositiveButton("XÓA", (dialogInterface, i) -> {
                             Aircraft currentAircraft = (Aircraft) DJISDKManager.getInstance().getProduct();
                             if (currentAircraft == null || currentAircraft.getCamera() == null || currentAircraft.getCamera().getMediaManager() == null) {
-                                Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
+                                AppToast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show();
                                 return;
                             }
 
@@ -3958,7 +3987,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             adapter.clearSelection();
                             adapter.setSelectionMode(false);
 
-                            Toast.makeText(MainActivity.this, "Đang xóa " + toDelete.size() + " file khỏi máy bay...", Toast.LENGTH_SHORT).show();
+                            AppToast.makeText(MainActivity.this, "Đang xóa " + toDelete.size() + " file khỏi máy bay...", Toast.LENGTH_SHORT).show();
 
                             deleteFilesPermanently(delCamera, mediaManager, toDelete, storageFiles, adapter);
                         })
@@ -4023,7 +4052,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         // Kiểm tra kết nối Drone
         if (DJISDKManager.getInstance().getProduct() == null) {
-            Toast.makeText(
+            AppToast.makeText(
                     MainActivity.this,
                     "Chưa kết nối Drone!",
                     Toast.LENGTH_SHORT
@@ -4038,7 +4067,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         Camera camera = aircraft.getCamera();
 
         if (camera == null) {
-            Toast.makeText(
+            AppToast.makeText(
                     MainActivity.this,
                     "Không tìm thấy Camera!",
                     Toast.LENGTH_SHORT
@@ -4054,7 +4083,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 return;
             }
 
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang mở thẻ nhớ và quét toàn bộ file trên drone...", Toast.LENGTH_SHORT).show());
+            runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Đang mở thẻ nhớ và quét toàn bộ file trên drone...", Toast.LENGTH_SHORT).show());
 
             // 3. Thực hiện quét
             loadMediaFilesForActiveStorage(camera, mediaManager, storageFiles, adapter, null);
@@ -4124,17 +4153,11 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private void showDeleteLogDialog(String title) {
         String text;
         synchronized (deleteLog) { text = deleteLog.toString(); }
-        TextView tv = new TextView(this);
-        tv.setText(text);
-        tv.setTextIsSelectable(true);
-        tv.setTextSize(12);
-        int pad = (int) (16 * getResources().getDisplayMetrics().density);
-        tv.setPadding(pad, pad / 2, pad, 0);
-        android.widget.ScrollView sv = new android.widget.ScrollView(this);
-        sv.addView(tv);
-        new androidx.appcompat.app.AlertDialog.Builder(this)
+        new AppDialog(this)
+                .setStyle(NoticeStyle.guess(title))
                 .setTitle(title)
-                .setView(sv)
+                .setMessage(text.trim())
+                .setMessageSelectable(true)
                 .setPositiveButton("ĐÓNG", null)
                 .show();
     }
@@ -4272,12 +4295,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
     private void retryGetMediaManager(Camera camera, List<MediaFile> storageFiles, StorageAdapter adapter, int attempt) {
         if (attempt > 3) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
+            runOnUiThread(() -> AppToast.makeText(MainActivity.this, "MediaManager chưa sẵn sàng!", Toast.LENGTH_SHORT).show());
             return;
         }
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             if (camera != null && camera.getMediaManager() != null) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Đang mở thẻ nhớ và quét toàn bộ file trên drone...", Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Đang mở thẻ nhớ và quét toàn bộ file trên drone...", Toast.LENGTH_SHORT).show());
                 loadMediaFilesForActiveStorage(camera, camera.getMediaManager(), storageFiles, adapter, null);
             } else {
                 retryGetMediaManager(camera, storageFiles, adapter, attempt + 1);
@@ -4307,7 +4330,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                             if (djiError == null) {
                                 new Handler(Looper.getMainLooper()).postDelayed(onReady, 1000);
                             } else {
-                                runOnUiThread(() -> Toast.makeText(
+                                runOnUiThread(() -> AppToast.makeText(
                                         MainActivity.this,
                                         "Chuyển chế độ Media: " + djiError.getDescription(),
                                         Toast.LENGTH_SHORT
@@ -4339,7 +4362,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             Runnable onComplete
     ) {
         if (camera == null || mediaManager == null) {
-            Toast.makeText(MainActivity.this, "Camera hoặc MediaManager không khả dụng!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(MainActivity.this, "Camera hoặc MediaManager không khả dụng!", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -4362,7 +4385,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 List<MediaFile> result = collectMediaSnapshot(mediaManager);
                 finalizeMediaFiles(result, storageFiles, adapter, onComplete);
                 if (result.isEmpty() && scanErrors.length() > 0) {
-                    Toast.makeText(MainActivity.this, "Lỗi quét từ drone:\n" + scanErrors, Toast.LENGTH_LONG).show();
+                    AppToast.makeText(MainActivity.this, "Lỗi quét từ drone:\n" + scanErrors, Toast.LENGTH_LONG).show();
                 }
                 android.util.Log.d("DJI_STORAGE", "Quét xong: " + result.size() + " file. Lỗi: " + scanErrors);
             }
@@ -4379,7 +4402,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                 storageFiles.addAll(partial);
                 adapter.notifyDataSetChanged();
             }
-            Toast.makeText(MainActivity.this, "Drone vẫn đang quét thẻ nhớ, vui lòng đợi...", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(MainActivity.this, "Drone vẫn đang quét thẻ nhớ, vui lòng đợi...", Toast.LENGTH_SHORT).show();
         }, 8000);
         // Chốt cứng sau 30 giây nếu drone không trả callback
         handler.postDelayed(finishAndPopulate, 30000);
@@ -4480,14 +4503,14 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             if (!allFiles.isEmpty()) {
                 storageFiles.addAll(allFiles);
                 adapter.notifyDataSetChanged();
-                Toast.makeText(
+                AppToast.makeText(
                         MainActivity.this,
                         "ĐÃ ĐỒNG BỘ XONG " + storageFiles.size() + " FILE!",
                         Toast.LENGTH_LONG
                 ).show();
             } else {
                 adapter.notifyDataSetChanged();
-                Toast.makeText(
+                AppToast.makeText(
                         MainActivity.this,
                         "Bộ nhớ máy bay đang trống (0 file)!",
                         Toast.LENGTH_LONG
@@ -4503,12 +4526,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     /** Dự phòng khi camera drone không cho chụp trong lúc quay: lưu khung hình live view vào điện thoại. */
     private void captureFrameFromLiveView(String hwError) {
         if (videoSurface == null || !videoSurface.isAvailable()) {
-            Toast.makeText(this, "Không chụp được: " + hwError, Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Không chụp được: " + hwError, Toast.LENGTH_SHORT).show();
             return;
         }
         Bitmap currentFrame = videoSurface.getBitmap();
         if (currentFrame == null) {
-            Toast.makeText(this, "Không lấy được khung hình video!", Toast.LENGTH_SHORT).show();
+            AppToast.makeText(this, "Không lấy được khung hình video!", Toast.LENGTH_SHORT).show();
             return;
         }
         saveLiveFramePhoto(currentFrame);
@@ -4569,13 +4592,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     }
                     photoCount++;
                     runOnUiThread(() -> {
-                        Toast.makeText(MainActivity.this, "Đã lưu ảnh vào điện thoại. Xem ở Lưu trữ > tab ẢNH TRÊN ĐIỆN THOẠI", Toast.LENGTH_SHORT).show();
+                        AppToast.makeText(MainActivity.this, "Đã lưu ảnh vào điện thoại. Xem ở Lưu trữ > tab ẢNH TRÊN ĐIỆN THOẠI", Toast.LENGTH_SHORT).show();
                     });
                 } else {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "Không thể lưu ảnh vào bộ nhớ!", Toast.LENGTH_SHORT).show());
+                    runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Không thể lưu ảnh vào bộ nhớ!", Toast.LENGTH_SHORT).show());
                 }
             } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(MainActivity.this, "Lỗi lưu ảnh: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                runOnUiThread(() -> AppToast.makeText(MainActivity.this, "Lỗi lưu ảnh: " + e.getMessage(), Toast.LENGTH_SHORT).show());
             }
         }).start();
     }
