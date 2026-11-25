@@ -28,7 +28,8 @@ import java.util.List;
 
 /**
  * Vẽ tất cả ruộng đã lưu lên một bản đồ MapLibre (dùng chung cho bản đồ chọn ruộng và mini map).
- * Màu theo trạng thái: xanh = đã bay xong, vàng = bay dở, xám = chưa bay. Gọi lại {@link #update} để làm mới.
+ * Mỗi ruộng có 1 màu riêng + số thứ tự (1, 2, 3... theo thứ tự lưu); trạng thái bay hiện ở dòng phụ của nhãn
+ * (xanh = đã bay xong, vàng = bay dở, xám = chưa bay). Gọi lại {@link #update} để làm mới.
  */
 public final class SavedFieldsLayer {
 
@@ -40,6 +41,28 @@ public final class SavedFieldsLayer {
     private static final String IMG_PREFIX = "saved-field-label-";
 
     private SavedFieldsLayer() { }
+
+    /** Bảng màu phân biệt các ruộng (lặp lại khi nhiều hơn số màu). */
+    private static final int[] PALETTE = {
+            0xFF42A5F5, 0xFFFF7043, 0xFFAB47BC, 0xFF26C6DA, 0xFFFFCA28,
+            0xFFEC407A, 0xFF9CCC65, 0xFF5C6BC0, 0xFF8D6E63, 0xFF26A69A,
+    };
+
+    /** Màu của ruộng thứ number (bắt đầu từ 1). */
+    public static int fieldColor(int number) {
+        return PALETTE[(Math.max(1, number) - 1) % PALETTE.length];
+    }
+
+    /** Số thứ tự (1..n) của ruộng trong danh sách đã lưu, 0 nếu không có. */
+    public static int fieldNumber(Context ctx, String id) {
+        if (id == null) return 0;
+        List<SavedFieldStore.SavedField> all = SavedFieldStore.list(ctx);
+        for (int i = 0; i < all.size(); i++) if (id.equals(all.get(i).id)) return i + 1;
+        return 0;
+    }
+
+    /** Thuộc tính "fid" của mỗi đa giác ruộng -> biết ruộng nào được chạm trên bản đồ. */
+    public static final String PROP_FIELD_ID = "fid";
 
     public static int statusColor(String status) {
         if (SavedFieldStore.STATUS_DONE.equals(status)) return 0xFF69F0AE;
@@ -58,7 +81,10 @@ public final class SavedFieldsLayer {
         float d = ctx.getResources().getDisplayMetrics().density;
         List<Feature> polys = new ArrayList<>();
         List<Feature> labels = new ArrayList<>();
-        for (SavedFieldStore.SavedField f : SavedFieldStore.list(ctx)) {
+        List<SavedFieldStore.SavedField> all = SavedFieldStore.list(ctx);
+        for (int idx = 0; idx < all.size(); idx++) {
+            SavedFieldStore.SavedField f = all.get(idx);
+            int number = idx + 1;
             if (f.id == null || f.id.equals(excludeId) || f.lats == null || f.lats.length < 3) continue;
 
             List<double[]> pts = new ArrayList<>();
@@ -70,13 +96,15 @@ public final class SavedFieldsLayer {
             List<List<Point>> rings = new ArrayList<>();
             rings.add(ring);
 
-            int color = statusColor(f.status);
+            int color = fieldColor(number);
             JsonObject props = new JsonObject();
             props.addProperty("color", String.format("#%06X", color & 0xFFFFFF));
+            props.addProperty(PROP_FIELD_ID, f.id);
             polys.add(Feature.fromGeometry(Polygon.fromLngLats(rings), props));
 
             String img = IMG_PREFIX + f.id;
-            style.addImage(img, labelBitmap(d, f.name != null ? f.name : "Ruộng", f.statusLabel(), color));
+            style.addImage(img, labelBitmap(d, number, f.name != null ? f.name : "Ruộng", f.statusLabel(),
+                    color, statusColor(f.status)));
             JsonObject lp = new JsonObject();
             lp.addProperty("img", img);
             labels.add(Feature.fromGeometry(Point.fromLngLat(f.centerLng(), f.centerLat()), lp));
@@ -96,10 +124,9 @@ public final class SavedFieldsLayer {
         style.addSource(new GeoJsonSource(LABEL_SOURCE_ID, labelFc));
 
         FillLayer fill = new FillLayer(FILL_LAYER_ID, SOURCE_ID);
-        fill.setProperties(PropertyFactory.fillColor(Expression.get("color")), PropertyFactory.fillOpacity(0.18f));
+        fill.setProperties(PropertyFactory.fillColor(Expression.get("color")), PropertyFactory.fillOpacity(0.28f));
         LineLayer line = new LineLayer(LINE_LAYER_ID, SOURCE_ID);
-        line.setProperties(PropertyFactory.lineColor(Expression.get("color")), PropertyFactory.lineWidth(2f),
-                PropertyFactory.lineDasharray(new Float[]{2f, 1.5f}));
+        line.setProperties(PropertyFactory.lineColor(Expression.get("color")), PropertyFactory.lineWidth(2.5f));
         SymbolLayer lbl = new SymbolLayer(LABEL_LAYER_ID, LABEL_SOURCE_ID);
         lbl.setProperties(PropertyFactory.iconImage(Expression.get("img")),
                 PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true));
@@ -127,34 +154,44 @@ public final class SavedFieldsLayer {
                 Math.atan2(b[0] - lat0, b[1] - lng0)));
     }
 
-    /** Nhãn tên ruộng (vẽ thành ảnh để không phụ thuộc font của kiểu bản đồ). */
-    private static Bitmap labelBitmap(float d, String name, String status, int color) {
+    /** Nhãn ruộng: ô số thứ tự (màu ruộng) + tên + trạng thái (vẽ thành ảnh, không phụ thuộc font bản đồ). */
+    private static Bitmap labelBitmap(float d, int number, String name, String status, int color, int statusColor) {
         Paint title = new Paint(Paint.ANTI_ALIAS_FLAG);
         title.setColor(0xFFFFFFFF);
         title.setTextSize(12 * d);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         Paint sub = new Paint(Paint.ANTI_ALIAS_FLAG);
-        sub.setColor(color);
+        sub.setColor(statusColor);
         sub.setTextSize(9.5f * d);
+        Paint num = new Paint(Paint.ANTI_ALIAS_FLAG);
+        num.setColor(0xFF111316);
+        num.setTextSize(13 * d);
+        num.setTypeface(Typeface.DEFAULT_BOLD);
+        num.setTextAlign(Paint.Align.CENTER);
 
         if (name.length() > 24) name = name.substring(0, 23) + "…";
-        float pad = 8 * d, dot = 7 * d;
-        float textW = Math.max(title.measureText(name), sub.measureText(status));
-        int w = (int) (pad * 2 + dot + 6 * d + textW);
+        String numStr = String.valueOf(number);
+        float pad = 6 * d;
         int h = (int) (pad * 2 + 12 * d + 11 * d);
+        float badge = Math.max(h - pad * 2, num.measureText(numStr) + 10 * d);
+        float textW = Math.max(title.measureText(name), sub.measureText(status));
+        int w = (int) (pad * 2 + badge + 7 * d + textW);
         Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(bmp);
         Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
         bg.setColor(0xE6191C21);
         c.drawRoundRect(new RectF(0, 0, w, h), 8 * d, 8 * d, bg);
         bg.setStyle(Paint.Style.STROKE);
-        bg.setStrokeWidth(1.2f * d);
+        bg.setStrokeWidth(1.4f * d);
         bg.setColor(color);
-        c.drawRoundRect(new RectF(0.6f * d, 0.6f * d, w - 0.6f * d, h - 0.6f * d), 8 * d, 8 * d, bg);
-        Paint dp = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dp.setColor(color);
-        c.drawCircle(pad + dot / 2, h / 2f, dot / 2, dp);
-        float tx = pad + dot + 6 * d;
+        c.drawRoundRect(new RectF(0.7f * d, 0.7f * d, w - 0.7f * d, h - 0.7f * d), 8 * d, 8 * d, bg);
+        Paint bp = new Paint(Paint.ANTI_ALIAS_FLAG);
+        bp.setColor(color);
+        RectF br = new RectF(pad, pad, pad + badge, h - pad);
+        c.drawRoundRect(br, 6 * d, 6 * d, bp);
+        Paint.FontMetrics fm = num.getFontMetrics();
+        c.drawText(numStr, br.centerX(), br.centerY() - (fm.ascent + fm.descent) / 2, num);
+        float tx = pad + badge + 7 * d;
         c.drawText(name, tx, pad + 11 * d, title);
         c.drawText(status, tx, pad + 12 * d + 9.5f * d, sub);
         return bmp;

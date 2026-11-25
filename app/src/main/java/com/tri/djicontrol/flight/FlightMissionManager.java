@@ -102,8 +102,22 @@ public class FlightMissionManager {
     private static final long PHOTO_SHOT_TIMEOUT_MS = 5000;
     /** Ước tính thời gian đứng thêm ở mỗi điểm để tải ảnh gốc từ thẻ nhớ (đẩy lên Cloud chạy nền). */
     public static final double PHOTO_UPLOAD_SECONDS_ESTIMATE = 8.0;
+    /** Ước tính thời gian dừng cho 1 ảnh khi chỉ lưu thẻ (phanh + ổn định + chụp). */
+    public static final double PHOTO_STOP_SECONDS_CARD = 4.0;
     /** Ước tính tổng thời gian dừng cho 1 ảnh (phanh + ổn định + chụp + tải ảnh) — dùng để tính thời gian bay. */
-    public static final double PHOTO_STOP_SECONDS_ESTIMATE = 4.0 + PHOTO_UPLOAD_SECONDS_ESTIMATE;
+    public static final double PHOTO_STOP_SECONDS_ESTIMATE = PHOTO_STOP_SECONDS_CARD + PHOTO_UPLOAD_SECONDS_ESTIMATE;
+
+    /** Thời gian dừng mỗi ảnh theo lựa chọn lưu: chỉ thẻ, hay thẻ + đẩy Cloud ngay. */
+    public static double photoStopSeconds(boolean cloudUpload) {
+        return cloudUpload ? PHOTO_STOP_SECONDS_ESTIMATE : PHOTO_STOP_SECONDS_CARD;
+    }
+
+    /** true: vừa bay vừa tải ảnh và đẩy lên Cloud; false: chỉ lưu vào thẻ nhớ (bay nhanh hơn). */
+    private boolean cloudUpload = false;
+
+    public void setCloudUpload(boolean enabled) {
+        cloudUpload = enabled;
+    }
 
     /** Chụp đứng yên: tải ảnh vừa chụp và đẩy lên Cloudinary (thư mục WP) ngay tại điểm dừng. */
     private WpPhotoUploader uploader;
@@ -198,6 +212,7 @@ public class FlightMissionManager {
      */
     public void startMappingMission(List<LocationCoordinate2D> gridPoints, float scanAltitude, float speed,
                                     boolean video, double photoDistance, MissionListener l) {
+        inspectMode = false;
         startInternal(gridPoints, scanAltitude, speed, video, photoDistance, l, null);
     }
 
@@ -206,6 +221,7 @@ public class FlightMissionManager {
      * (cùng mission_id, số ảnh cộng dồn).
      */
     public void resumeMission(MissionCheckpoint cp, MissionListener l) {
+        inspectMode = false;
         List<LocationCoordinate2D> list = new java.util.ArrayList<>();
         if (cp.scanStarted && cp.nextIndex > 0) {
             list.add(new LocationCoordinate2D(cp.resumeLat, cp.resumeLng));
@@ -214,6 +230,36 @@ public class FlightMissionManager {
             list.addAll(cp.waypoints); // chưa kịp quét -> bay lại từ đầu
         }
         startInternal(list, cp.scanAltitude, cp.speed, cp.video, cp.photoDistance, l, cp);
+    }
+
+    // =========================================================
+    // GIÁM SÁT: bay tới đúng vị trí 1 ảnh cũ, chụp lại 1 tấm mới rồi về Home
+    // =========================================================
+    /** Đang bay giám sát 1 điểm (không lưu/xóa tiến độ nhiệm vụ quét dở). */
+    private boolean inspectMode = false;
+    /** Hướng mũi + góc gimbal của ảnh cũ (NaN = giữ hướng hiện tại / nhìn thẳng xuống). */
+    private float inspectYaw = Float.NaN, inspectPitch = Float.NaN;
+
+    public boolean isInspecting() {
+        return running && inspectMode;
+    }
+
+    /**
+     * Bay tới (lat, lng) ở độ cao altitude (m, so với điểm cất cánh), xoay mũi theo yaw, gimbal theo pitch,
+     * chụp 1 ảnh (tải về điện thoại + đẩy Cloud nếu đã cấu hình) rồi bay về Home.
+     */
+    public void startInspection(double lat, double lng, float altitude, float yaw, float gimbalPitch,
+                                float speed, MissionListener l) {
+        if (running) { if (l != null) l.onFinished(false, "Đang có nhiệm vụ khác chạy!"); return; }
+        inspectMode = true;
+        inspectYaw = Float.isNaN(yaw) ? Float.NaN : normalizeYaw(yaw);
+        inspectPitch = Float.isNaN(gimbalPitch) ? Float.NaN : Math.max(-90f, Math.min(0f, gimbalPitch));
+        List<LocationCoordinate2D> pts = new java.util.ArrayList<>();
+        LocationCoordinate2D p = new LocationCoordinate2D(lat, lng);
+        pts.add(p);
+        pts.add(p); // 2 điểm trùng nhau: tới nơi -> chụp 1 ảnh -> xong
+        startInternal(pts, Math.max(2f, Math.min(120f, altitude)), speed, false, 1000.0, l, null);
+        if (!running) inspectMode = false;
     }
 
     private void startInternal(List<LocationCoordinate2D> gridPoints, float scanAltitude, float speed,
@@ -360,6 +406,8 @@ public class FlightMissionManager {
         double lng = st.getAircraftLocation().getLongitude();
         float alt = st.getAircraftLocation().getAltitude();
         float yaw = (float) st.getAttitude().yaw;
+        // Giám sát: quay mũi đúng hướng ảnh cũ ngay từ lúc bay tới
+        if (inspectMode && !Float.isNaN(inspectYaw) && state != State.RISING) yaw = inspectYaw;
 
         boolean active = state == State.RISING || state == State.TO_FIRST_POINT || state == State.TO_SCAN_ALT
                 || state == State.PREPARING_CAMERA || state == State.SCANNING;
@@ -367,6 +415,11 @@ public class FlightMissionManager {
         // Pin xuống ngưỡng -> lưu tiến độ, dừng camera, tự bay về Home
         if (active && batteryPercent > 0) {
             lastThreshold = batteryThreshold(st);
+            if (batteryPercent <= lastThreshold && inspectMode) {
+                abort(String.format(Locale.US, "Pin yếu (%d%%) — dừng giám sát, drone đang bay về Home.",
+                        batteryPercent), true);
+                return;
+            }
             if (batteryPercent <= lastThreshold) {
                 MissionCheckpoint cp = saveCheckpoint(lat, lng, "Pin yếu");
                 abort(String.format(Locale.US,
@@ -379,7 +432,7 @@ public class FlightMissionManager {
 
         // Người dùng/drone tự kích hoạt RTH (vd Smart RTH khi pin yếu) hoặc đáp -> dừng nhiệm vụ
         if (st.isGoingHome()) {
-            if (active) {
+            if (active && !inspectMode) {
                 MissionCheckpoint cp = saveCheckpoint(lat, lng, "Drone tự bay về nhà");
                 abort("Drone đang tự bay về nhà — đã lưu tiến độ " + cp.progressPercent()
                         + "%, có thể bay tiếp sau.", false);
@@ -403,7 +456,8 @@ public class FlightMissionManager {
                 LocationCoordinate2D first = waypoints.get(0);
                 if (flyToward(lat, lng, first, MAX_TRANSIT_SPEED, transitAlt, yaw)) {
                     setState(State.TO_SCAN_ALT);
-                    setGimbalAngle(-90f); // camera nhìn thẳng xuống
+                    // camera nhìn thẳng xuống (giám sát: đúng góc gimbal của ảnh cũ)
+                    setGimbalAngle(inspectMode && !Float.isNaN(inspectPitch) ? inspectPitch : -90f);
                     status(String.format(Locale.US, "Về độ cao quét %.0fm...", scanAlt));
                 }
                 break;
@@ -626,31 +680,74 @@ public class FlightMissionManager {
     }
 
     private void fireHoldShot() {
+        fireHoldShot(true);
+    }
+
+    /** retry = true: chụp lỗi thì đưa camera về chế độ chụp ảnh rồi thử lại đúng 1 lần. */
+    private void fireHoldShot(boolean retry) {
         shotFired = true;
         shooting = true;
         shotFiredMs = System.currentTimeMillis();
         lastShotTime = shotFiredMs;
         camera.startShootPhoto(err -> handler.post(() -> {
-            shooting = false;
-            holdReleaseAtMs = System.currentTimeMillis() + PHOTO_AFTER_SHOT_MS;
+            if (!running) { shooting = false; return; }
             if (err == null) {
+                shooting = false;
+                holdReleaseAtMs = System.currentTimeMillis() + PHOTO_AFTER_SHOT_MS;
                 photoCount++;
                 progress();
-                if (uploader != null && running) transferShotToCloud();
+                if (uploader != null) transferShotToCloud();
+                return;
+            }
+            Log.w(TAG, "Chụp lỗi: " + err.getDescription());
+            if (retry) {
+                // Thường do camera còn kẹt ở Playback / sai chế độ -> đặt lại chế độ chụp rồi bấm lại
+                status("Chụp lỗi (" + err.getDescription() + "), đặt lại camera và chụp lại...");
+                shotFiredMs = System.currentTimeMillis() + 4000; // tránh timeout trong lúc đổi chế độ
+                restorePhotoMode(() -> { if (running && holding) fireHoldShot(false); });
             } else {
-                Log.w(TAG, "Chụp lỗi: " + err.getDescription());
+                shooting = false;
+                holdReleaseAtMs = System.currentTimeMillis() + PHOTO_AFTER_SHOT_MS;
+                status("Không chụp được ảnh tại điểm này: " + err.getDescription());
             }
         }));
+    }
+
+    /** Đưa camera về chế độ chụp ảnh đơn (thoát Playback / MEDIA_DOWNLOAD nếu đang kẹt). */
+    private void restorePhotoMode(Runnable then) {
+        Runnable done = () -> handler.postDelayed(then, 800);
+        try {
+            if (isFlat()) {
+                camera.exitPlayback(ignored -> camera.setFlatMode(SettingsDefinitions.FlatCameraMode.PHOTO_SINGLE,
+                        err -> {
+                            if (err != null) Log.w(TAG, "setFlatMode: " + err.getDescription());
+                            handler.post(done);
+                        }));
+            } else {
+                camera.setMode(SettingsDefinitions.CameraMode.SHOOT_PHOTO, err -> {
+                    if (err != null) Log.w(TAG, "setMode SHOOT_PHOTO: " + err.getDescription());
+                    camera.setShootPhotoMode(SettingsDefinitions.ShootPhotoMode.SINGLE, e2 -> handler.post(done));
+                });
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "restorePhotoMode", e);
+            handler.post(done);
+        }
     }
 
     /** Chỉ dùng cho chế độ chụp đứng yên và khi đã cấu hình Cloudinary. */
     private void setupUploader() {
         if (uploader != null) uploader.detach();
         uploader = null;
-        if (videoMode || camera == null || !WpPhotoUploader.isAvailable(appContext)) return;
+        if (videoMode || !(cloudUpload || inspectMode) || camera == null) return;
+        if (!WpPhotoUploader.isAvailable(appContext)) {
+            status("Chưa cấu hình Cloud -> ảnh chỉ lưu vào thẻ nhớ");
+            return;
+        }
         uploader = new WpPhotoUploader(appContext, camera, isFlat());
         uploader.setUploadListener((up, failed, pending, msg) -> {
             if (listener != null) handler.post(() -> listener.onCloudUpload(up, failed, pending, msg));
+            if (msg != null && msg.startsWith("Lỗi Cloud") && running) handler.post(() -> status(msg));
         });
         uploader.attach();
     }
@@ -662,13 +759,27 @@ public class FlightMissionManager {
         uploader.transferLatest((ok, msg) -> {
             transferring = false;
             holdReleaseAtMs = System.currentTimeMillis() + PHOTO_AFTER_SHOT_MS;
-            if (!ok) Log.w(TAG, "Upload WP: " + msg);
+            if (!ok) {
+                Log.w(TAG, "Upload WP: " + msg);
+                if (running) status("Ảnh " + photoCount + ": " + msg);
+            } else if (running) {
+                status("Đang bay quét...");
+            }
         });
     }
 
     private void releaseUploader() {
         transferring = false;
         if (uploader != null) uploader.detach(); // upload đang chạy nền vẫn tiếp tục
+    }
+
+    /** Đợi tối đa ~30s cho ảnh đang tải về điện thoại xong rồi mới dừng camera. */
+    private void stopCameraAfterTransfer(Runnable then, int tries) {
+        if ((transferring || shooting) && tries < 60) {
+            handler.postDelayed(() -> stopCameraAfterTransfer(then, tries + 1), 500);
+            return;
+        }
+        stopCamera(then);
     }
 
     private void stopCamera(Runnable then) {
@@ -692,6 +803,15 @@ public class FlightMissionManager {
     // KẾT THÚC / DỪNG
     // =========================================================
     private void finishMission() {
+        if (inspectMode) {
+            // Không đụng tới tiến độ nhiệm vụ quét đang dở. Đợi ảnh tải về điện thoại xong mới về.
+            stopCameraAfterTransfer(() -> {
+                setGimbalAngle(0f);
+                goHome(photoCount > 0 ? "Đã chụp lại ảnh giám sát. Drone đang bay về."
+                        : "Không chụp được ảnh giám sát. Drone đang bay về.", photoCount > 0);
+            }, 0);
+            return;
+        }
         MissionCheckpoint.clear(appContext); // quét xong toàn bộ -> không còn gì để bay tiếp
         stopCamera(() -> {
             setGimbalAngle(0f);
@@ -706,7 +826,7 @@ public class FlightMissionManager {
             startReturnToHome();
             return;
         }
-        MissionCheckpoint.clear(appContext); // người dùng chủ động dừng -> bỏ tiến độ cũ
+        if (!inspectMode) MissionCheckpoint.clear(appContext); // người dùng chủ động dừng -> bỏ tiến độ cũ
         abort("Đã dừng nhiệm vụ, drone đang bay về nhà", true);
     }
 

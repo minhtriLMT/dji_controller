@@ -198,6 +198,33 @@
                         android:text="Quay video" />
                 </RadioGroup>
 
+                <!-- Chỉ áp dụng khi chụp ảnh: lưu thẻ nhớ, hoặc vừa bay vừa đẩy lên Cloud -->
+                <TextView
+                    android:id="@+id/tvWPSaveTitle"
+                    style="@style/CfSectionTitle"
+                    android:layout_marginTop="12dp"
+                    android:text="LƯU ẢNH" />
+
+                <RadioGroup
+                    android:id="@+id/rgWPSave"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:background="@drawable/bg_wp_segment"
+                    android:orientation="horizontal"
+                    android:padding="3dp">
+
+                    <RadioButton
+                        android:id="@+id/rbWPSaveCard"
+                        style="@style/WpSegment"
+                        android:checked="true"
+                        android:text="Thẻ nhớ" />
+
+                    <RadioButton
+                        android:id="@+id/rbWPSaveCloud"
+                        style="@style/WpSegment"
+                        android:text="Thẻ + Cloud ngay" />
+                </RadioGroup>
+
                 <!-- Pin yếu -> về Home, lưu tiến độ để bay tiếp -->
                 <TextView
                     style="@style/CfSectionTitle"

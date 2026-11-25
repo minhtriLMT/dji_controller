@@ -380,7 +380,7 @@ public class StorageAdapter extends BaseAdapter {
         dialog.setContentView(R.layout.dialog_media_viewer);
         setupViewerHeader(dialog, mediaFile.getFileName(), formatMediaSubtitle(mediaFile), false);
         ((TextView) dialog.findViewById(R.id.viewerHint))
-                .setText("Đang xem bản xem trước • Tải về máy để có ảnh gốc độ phân giải đầy đủ");
+                .setText("Chụm 2 ngón để phóng to • Tải về máy để có ảnh gốc độ phân giải đầy đủ");
 
         // Lớp chờ: chỉ hiện vòng xoay trên nền trong suốt để vẫn thấy ảnh thu nhỏ phía sau
         View progressBar = dialog.findViewById(R.id.viewerLoading);

@@ -332,6 +332,12 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                     setMapExpanded(true);
                     return true;
                 }
+                // Bản đồ to: chạm vào 1 ruộng đã lưu -> xem ảnh đã chụp của ruộng đó
+                String fid = savedFieldAt(point);
+                if (fid != null) {
+                    showFieldPhotosDialog(fid);
+                    return true;
+                }
                 return false;
             });
             applyMiniMapUiMode();
@@ -2194,6 +2200,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private double wpSpacing = 5.0;
     private float wpSpeed = 3f;
     private boolean wpVideo = false;
+    /** Chụp ảnh WP: true = vừa bay vừa đẩy ảnh lên Cloud, false = chỉ lưu thẻ nhớ. */
+    private boolean wpCloudUpload = false;
     private List<LocationCoordinate2D> plannedWaypoints = new ArrayList<>();
     private GeoJsonSource fieldOutlineSource, wpDoneSource, wpStartSource;
     private String wpStatusText = null;
@@ -2330,7 +2338,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     /** Thời gian quét (phút) = bay + dừng chụp ở mỗi điểm (chế độ ảnh). */
     private double wpEstimatedMinutes(GridPlanner.Plan plan) {
         double sec = plan.lengthMeters / wpEffectiveSpeed();
-        if (!wpVideo) sec += wpEstimatedShots(plan) * FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE;
+        if (!wpVideo) sec += wpEstimatedShots(plan) * FlightMissionManager.photoStopSeconds(wpCloudUpload);
         return sec / 60.0;
     }
 
@@ -2348,7 +2356,8 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         int shots = wpEstimatedShots(plan);
 
         TextView tvMode = cf.findViewById(R.id.tvCfMode);
-        tvMode.setText(wpVideo ? "🎥  QUAY VIDEO" : "📷  CHỤP ẢNH");
+        tvMode.setText(wpVideo ? "🎥  QUAY VIDEO"
+                : wpCloudUpload ? "📷  CHỤP ẢNH • THẺ + CLOUD" : "📷  CHỤP ẢNH • LƯU THẺ");
 
         // --- Thông số ---
         LinearLayout row1 = cf.findViewById(R.id.cfStatsRow1);
@@ -2369,8 +2378,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         if (!wpVideo) {
             TextView note = cf.findViewById(R.id.tvCfSpeedNote);
             note.setText(String.format(Locale.US,
-                    "ⓘ Drone dừng ~%.0f s ở mỗi điểm: chụp ảnh nét + tải ảnh đẩy lên Cloud (đã tính vào thời gian)",
-                    FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE));
+                    wpCloudUpload
+                            ? "ⓘ Drone dừng ~%.0f s ở mỗi điểm: chụp ảnh nét + tải ảnh đẩy lên Cloud (đã tính vào thời gian)"
+                            : "ⓘ Drone dừng ~%.0f s ở mỗi điểm để chụp ảnh nét, ảnh lưu vào thẻ nhớ (đã tính vào thời gian)",
+                    FlightMissionManager.photoStopSeconds(wpCloudUpload)));
             note.setVisibility(View.VISIBLE);
         }
         StringBuilder warnText = new StringBuilder();
@@ -2461,7 +2472,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         sb.append(String.format(Locale.US, "Thời gian quét ≈ %.1f phút", minutes));
         if (!wpVideo) {
             sb.append(String.format(Locale.US, " • ≈ %d ảnh (mỗi %.1f m, dừng ~%.0f s/ảnh)",
-                    wpEstimatedShots(plan), wpPhotoDistance(), FlightMissionManager.PHOTO_STOP_SECONDS_ESTIMATE));
+                    wpEstimatedShots(plan), wpPhotoDistance(), FlightMissionManager.photoStopSeconds(wpCloudUpload)));
         } else {
             sb.append(" • quay video liên tục");
         }
@@ -2510,6 +2521,10 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         EditText edtSpeed = dialog.findViewById(R.id.edtWPSpeed);
         android.widget.RadioButton rbPhoto = dialog.findViewById(R.id.rbWPPhoto);
         android.widget.RadioButton rbVideo = dialog.findViewById(R.id.rbWPVideo);
+        android.widget.RadioButton rbSaveCard = dialog.findViewById(R.id.rbWPSaveCard);
+        android.widget.RadioButton rbSaveCloud = dialog.findViewById(R.id.rbWPSaveCloud);
+        View rgSave = dialog.findViewById(R.id.rgWPSave);
+        View tvSaveTitle = dialog.findViewById(R.id.tvWPSaveTitle);
         TextView tvEstimate = dialog.findViewById(R.id.tvWPEstimate);
         Button btnClear = dialog.findViewById(R.id.btnClearWP);
         Button btnCreate = dialog.findViewById(R.id.btnCreateWP);
@@ -2547,6 +2562,16 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         edtSpacing.setText(String.format(Locale.US, "%.1f", wpSpacing));
         edtSpeed.setText(String.format(Locale.US, "%.1f", wpSpeed));
         if (wpVideo) rbVideo.setChecked(true); else rbPhoto.setChecked(true);
+        if (wpCloudUpload) rbSaveCloud.setChecked(true); else rbSaveCard.setChecked(true);
+        // Lựa chọn lưu ảnh chỉ có nghĩa khi chụp ảnh (video luôn lưu thẻ)
+        Runnable syncSaveVisibility = () -> {
+            int vis = rbVideo.isChecked() ? View.GONE : View.VISIBLE;
+            rgSave.setVisibility(vis);
+            tvSaveTitle.setVisibility(vis);
+        };
+        syncSaveVisibility.run();
+        rbPhoto.setOnCheckedChangeListener((b, c) -> syncSaveVisibility.run());
+        rbVideo.setOnCheckedChangeListener((b, c) -> syncSaveVisibility.run());
         EditText edtBattery = dialog.findViewById(R.id.edtWPBattery);
         edtBattery.setText(String.valueOf(wpLowBattery));
 
@@ -2589,6 +2614,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
             wpSpacing = spacing;
             wpSpeed = speed;
             wpVideo = rbVideo.isChecked();
+            wpCloudUpload = rbSaveCloud.isChecked();
             wpLowBattery = Math.round(bat);
             if (missionManager != null) missionManager.setLowBatteryThreshold(wpLowBattery);
             return true;
@@ -2702,6 +2728,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
         com.tri.djicontrol.flight.MissionCheckpoint.clear(this); // nhiệm vụ mới thay cho nhiệm vụ dở cũ
         missionManager.onBatteryUpdate(batteryPercent);
         missionManager.setLowBatteryThreshold(wpLowBattery);
+        missionManager.setCloudUpload(wpCloudUpload);
         missionManager.startMappingMission(new ArrayList<>(plannedWaypoints), wpAltitude, wpEffectiveSpeed(),
                 video, wpPhotoDistance(), createWpListener(video));
         // Gắn chuyến bay vào mảnh ruộng đang chọn (nếu đã lưu) để đánh dấu đã bay
@@ -2858,7 +2885,13 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
     private View buildSavedFieldRow(LinearLayout parent, com.tri.djicontrol.field.SavedFieldStore.SavedField f,
                                     android.app.Dialog listDialog, Dialog wpDialog, Runnable rerender) {
         View row = LayoutInflater.from(this).inflate(R.layout.item_saved_field, parent, false);
-        ((TextView) row.findViewById(R.id.tvFieldName)).setText(f.name);
+        int fieldNo = com.tri.djicontrol.field.SavedFieldsLayer.fieldNumber(this, f.id);
+        TextView tvName = row.findViewById(R.id.tvFieldName);
+        android.text.SpannableString nameSp = new android.text.SpannableString(fieldNo + "  " + f.name);
+        nameSp.setSpan(new android.text.style.ForegroundColorSpan(
+                        com.tri.djicontrol.field.SavedFieldsLayer.fieldColor(fieldNo)), 0, String.valueOf(fieldNo).length(),
+                android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        tvName.setText(nameSp);
         row.findViewById(R.id.tvFieldCurrent).setVisibility(f.id.equals(currentFieldId) ? View.VISIBLE : View.GONE);
 
         String when = f.lastFlownAt > 0
@@ -2901,6 +2934,233 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
                         .setNegativeButton("HỦY", null)
                         .show());
         return row;
+    }
+
+    // =========================================================
+    // CHẠM RUỘNG TRÊN BẢN ĐỒ -> ẢNH ĐÃ CHỤP + BAY GIÁM SÁT 1 ẢNH
+    // =========================================================
+    /** Id ruộng đã lưu tại điểm chạm trên mini map (null nếu không trúng ruộng nào). */
+    private String savedFieldAt(org.maplibre.android.geometry.LatLng point) {
+        if (miniMapLibreMap == null || miniMapLibreMap.getStyle() == null) return null;
+        android.graphics.PointF sp = miniMapLibreMap.getProjection().toScreenLocation(point);
+        List<Feature> hit = miniMapLibreMap.queryRenderedFeatures(sp,
+                com.tri.djicontrol.field.SavedFieldsLayer.FILL_LAYER_ID);
+        for (Feature f : hit) {
+            if (f.hasProperty(com.tri.djicontrol.field.SavedFieldsLayer.PROP_FIELD_ID)) {
+                return f.getStringProperty(com.tri.djicontrol.field.SavedFieldsLayer.PROP_FIELD_ID);
+            }
+        }
+        // Ruộng đang chọn được vẽ ở lớp riêng (không nằm trong lớp ruộng đã lưu)
+        if (currentFieldId != null && fieldPoints.size() >= 3
+                && !miniMapLibreMap.queryRenderedFeatures(sp, "wp-field-fill").isEmpty()) {
+            return currentFieldId;
+        }
+        return null;
+    }
+
+    private final java.util.concurrent.ExecutorService fieldPhotoWorker =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    /** Giải mã ảnh thu nhỏ (cạnh dài ~maxPx) để không tốn RAM với ảnh gốc 12MP. */
+    private static android.graphics.Bitmap decodeSampled(File f, int maxPx) {
+        android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+        int s = 1;
+        while (Math.max(o.outWidth, o.outHeight) / (s * 2) >= maxPx) s *= 2;
+        o.inJustDecodeBounds = false;
+        o.inSampleSize = s;
+        return android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+    }
+
+    private void showFieldPhotosDialog(String fieldId) {
+        com.tri.djicontrol.field.SavedFieldStore.SavedField field =
+                com.tri.djicontrol.field.SavedFieldStore.get(this, fieldId);
+        if (field == null) return;
+        int number = com.tri.djicontrol.field.SavedFieldsLayer.fieldNumber(this, fieldId);
+        int color = com.tri.djicontrol.field.SavedFieldsLayer.fieldColor(number);
+        float dens = getResources().getDisplayMetrics().density;
+
+        android.app.Dialog d = new android.app.Dialog(this, R.style.CfDialog);
+        d.setContentView(R.layout.dialog_field_photos);
+        TextView tvNum = d.findViewById(R.id.tvFieldPhotosNumber);
+        tvNum.setText(String.valueOf(number));
+        tvNum.setBackgroundTintList(android.content.res.ColorStateList.valueOf(color));
+        ((TextView) d.findViewById(R.id.tvFieldPhotosTitle)).setText(field.name);
+        TextView tvInfo = d.findViewById(R.id.tvFieldPhotosInfo);
+        tvInfo.setText(String.format(Locale.US, "%.2f ha • %s • đang tìm ảnh...", field.areaHa, field.statusLabel()));
+        GridView grid = d.findViewById(R.id.gridFieldPhotos);
+        TextView tvEmpty = d.findViewById(R.id.tvFieldPhotosEmpty);
+        android.widget.ImageView ivPreview = d.findViewById(R.id.ivFieldPhotoPreview);
+        TextView tvMeta = d.findViewById(R.id.tvFieldPhotoMeta);
+        Button btnInspect = d.findViewById(R.id.btnFieldPhotoInspect);
+        btnInspect.setAlpha(0.45f);
+        d.findViewById(R.id.btnFieldPhotosClose).setOnClickListener(v -> d.dismiss());
+
+        final List<com.tri.djicontrol.field.FieldPhotoIndex.Photo> photos = new ArrayList<>();
+        final android.util.LruCache<String, android.graphics.Bitmap> thumbs = new android.util.LruCache<>(60);
+        final com.tri.djicontrol.field.FieldPhotoIndex.Photo[] selected = new com.tri.djicontrol.field.FieldPhotoIndex.Photo[1];
+        final Handler ui = new Handler(Looper.getMainLooper());
+        final boolean[] open = {true};
+        d.setOnDismissListener(x -> open[0] = false);
+
+        android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
+            @Override public int getCount() { return photos.size(); }
+            @Override public Object getItem(int i) { return photos.get(i); }
+            @Override public long getItemId(int i) { return i; }
+
+            @Override
+            public View getView(int i, View convert, android.view.ViewGroup parent) {
+                android.widget.ImageView iv = convert instanceof android.widget.ImageView
+                        ? (android.widget.ImageView) convert : new android.widget.ImageView(MainActivity.this);
+                int size = grid.getColumnWidth() > 0 ? grid.getColumnWidth() : Math.round(96 * dens);
+                iv.setLayoutParams(new android.widget.AbsListView.LayoutParams(size, size));
+                iv.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                int pad = Math.round(2 * dens);
+                iv.setPadding(pad, pad, pad, pad);
+                com.tri.djicontrol.field.FieldPhotoIndex.Photo p = photos.get(i);
+                iv.setBackgroundColor(p == selected[0] ? color : 0x22FFFFFF);
+                String key = p.file.getAbsolutePath();
+                iv.setTag(key);
+                android.graphics.Bitmap b = thumbs.get(key);
+                iv.setImageBitmap(b);
+                if (b == null) {
+                    fieldPhotoWorker.execute(() -> {
+                        if (!open[0]) return;
+                        android.graphics.Bitmap bmp = decodeSampled(p.file, 200);
+                        ui.post(() -> {
+                            if (bmp != null) thumbs.put(key, bmp);
+                            if (key.equals(iv.getTag())) iv.setImageBitmap(bmp);
+                        });
+                    });
+                }
+                return iv;
+            }
+        };
+        grid.setAdapter(adapter);
+        grid.setOnItemClickListener((parent, view, pos, id) -> {
+            com.tri.djicontrol.field.FieldPhotoIndex.Photo p = photos.get(pos);
+            selected[0] = p;
+            adapter.notifyDataSetChanged();
+            ivPreview.setImageBitmap(thumbs.get(p.file.getAbsolutePath()));
+            fieldPhotoWorker.execute(() -> {
+                android.graphics.Bitmap big = decodeSampled(p.file, 1280);
+                ui.post(() -> { if (selected[0] == p && big != null) ivPreview.setImageBitmap(big); });
+            });
+            float alt = Float.isNaN(p.relAlt) ? field.altitude : p.relAlt;
+            tvMeta.setText(String.format(Locale.US, "%s\n%s\n%.6f, %.6f • cao %.1f m%s%s",
+                    p.file.getName(),
+                    new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.US).format(new java.util.Date(p.takenAt)),
+                    p.lat, p.lng, alt, Float.isNaN(p.relAlt) ? " (theo ruộng)" : "",
+                    Float.isNaN(p.yaw) ? "" : String.format(Locale.US, " • mũi %.0f°", p.yaw)));
+            boolean busy = missionManager == null || missionManager.isRunning();
+            btnInspect.setEnabled(!busy);
+            btnInspect.setAlpha(busy ? 0.45f : 1f);
+            if (busy) tvMeta.append(missionManager == null ? "\n⚠ Chưa kết nối drone" : "\n⚠ Đang có nhiệm vụ bay khác");
+        });
+        btnInspect.setOnClickListener(v -> {
+            if (selected[0] == null) return;
+            confirmInspectPhoto(field, selected[0], d);
+        });
+
+        Runnable load = () -> {
+            List<com.tri.djicontrol.field.FieldPhotoIndex.Photo> found =
+                    com.tri.djicontrol.field.FieldPhotoIndex.findInField(this, field);
+            ui.post(() -> {
+                if (!open[0]) return;
+                boolean changed = found.size() != photos.size();
+                photos.clear();
+                photos.addAll(found);
+                // Giữ ảnh đang chọn khi danh sách được làm mới trong lúc bay
+                if (selected[0] != null) {
+                    String sel = selected[0].file.getAbsolutePath();
+                    for (com.tri.djicontrol.field.FieldPhotoIndex.Photo p : found) {
+                        if (p.file.getAbsolutePath().equals(sel)) { selected[0] = p; break; }
+                    }
+                }
+                if (changed) adapter.notifyDataSetChanged();
+                boolean flying = missionManager != null && missionManager.isRunning();
+                tvInfo.setText(String.format(Locale.US, "%.2f ha • %s • %d ảnh trên điện thoại%s",
+                        field.areaHa, field.statusLabel(), found.size(),
+                        flying ? " • đang bay, tự cập nhật ảnh mới" : ""));
+                tvEmpty.setText("Chưa có ảnh nào của ruộng này trên điện thoại.\n"
+                        + "Bay quét chế độ \"Thẻ + Cloud ngay\", hoặc tải ảnh từ Lưu trữ > THẺ NHỚ DRONE.");
+                tvEmpty.setVisibility(found.isEmpty() ? View.VISIBLE : View.GONE);
+            });
+        };
+        fieldPhotoWorker.execute(load);
+        // Đang bay (quét / giám sát): cứ 4 s quét lại thư mục để ảnh vừa tải về hiện ngay trong tab
+        Runnable[] poll = new Runnable[1];
+        poll[0] = () -> {
+            if (!open[0]) return;
+            if (missionManager != null && missionManager.isRunning()) fieldPhotoWorker.execute(load);
+            ui.postDelayed(poll[0], 4000);
+        };
+        ui.postDelayed(poll[0], 4000);
+
+        d.show();
+        if (d.getWindow() != null) {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            d.getWindow().setLayout((int) Math.min(dm.widthPixels * 0.92f, 1000 * dm.density),
+                    (int) (dm.heightPixels * 0.88f));
+        }
+    }
+
+    /** Hỏi lại rồi bay tới đúng vị trí/độ cao/hướng của ảnh cũ, chụp 1 tấm mới và về Home. */
+    private void confirmInspectPhoto(com.tri.djicontrol.field.SavedFieldStore.SavedField field,
+                                     com.tri.djicontrol.field.FieldPhotoIndex.Photo p, android.app.Dialog photosDialog) {
+        if (missionManager == null) {
+            Toast.makeText(this, "Chưa kết nối drone!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (missionManager.isRunning()) {
+            Toast.makeText(this, "Đang có nhiệm vụ bay khác!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        float alt = Float.isNaN(p.relAlt) ? field.altitude : p.relAlt;
+        float transit = Math.max(alt, wpTransitAlt);
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Bay giám sát ảnh này?")
+                .setMessage(String.format(Locale.US,
+                        "Drone sẽ:\n• Cất cánh (nếu đang ở đất) và lên %.0f m\n• Bay tới %.6f, %.6f\n"
+                                + "• Hạ xuống %.1f m, quay đúng hướng ảnh cũ và chụp 1 ảnh mới\n"
+                                + "• Tải ảnh về điện thoại (đẩy Cloud nếu đã cấu hình) rồi tự bay về Home\n\n"
+                                + "Kiểm tra xung quanh không có vật cản trước khi bay.",
+                        transit, p.lat, p.lng, alt))
+                .setPositiveButton("BAY", (x, i) -> {
+                    photosDialog.dismiss();
+                    missionManager.onBatteryUpdate(batteryPercent);
+                    missionManager.setLowBatteryThreshold(wpLowBattery);
+                    missionManager.setTransitAltitude(wpTransitAlt);
+                    missionManager.setReturnAltitude(wpReturnAlt);
+                    missionManager.startInspection(p.lat, p.lng, alt, p.yaw, p.gimbalPitch,
+                            Math.max(1f, Math.min(field.speed, 5f)), createInspectListener(field));
+                })
+                .setNegativeButton("HỦY", null)
+                .show();
+    }
+
+    private FlightMissionManager.MissionListener createInspectListener(
+            com.tri.djicontrol.field.SavedFieldStore.SavedField field) {
+        return new FlightMissionManager.MissionListener() {
+            @Override public void onStatus(String status) { setWpStatus("Giám sát: " + status); }
+
+            @Override public void onProgress(int reachedIndex, int total, int photoCount) { }
+
+            @Override
+            public void onFinished(boolean completed, String message) {
+                setWpStatus("Giám sát: " + message);
+                if (activeWpStopButton != null) activeWpStopButton.setVisibility(View.GONE);
+                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle(completed ? "Đã chụp lại ảnh giám sát" : "Giám sát đã dừng")
+                        .setMessage(message + (completed
+                                ? "\n\nẢnh mới đã lưu vào thẻ nhớ và có trong tab ảnh của ruộng \"" + field.name + "\"."
+                                : ""))
+                        .setPositiveButton("XEM ẢNH RUỘNG", (x, i) -> showFieldPhotosDialog(field.id))
+                        .setNegativeButton("OK", null)
+                        .show();
+            }
+        };
     }
 
     /** Xanh = đã bay xong, vàng = bay dở, xám = chưa bay (dùng chung với bản đồ). */
@@ -3011,6 +3271,7 @@ public class MainActivity extends AppCompatActivity implements TextureView.Surfa
 
         missionManager.onBatteryUpdate(batteryPercent);
         missionManager.setLowBatteryThreshold(wpLowBattery);
+        missionManager.setCloudUpload(wpCloudUpload);
         missionManager.resumeMission(cp, createWpListener(cp.video));
         Toast.makeText(this, "Bay tiếp nhiệm vụ từ " + cp.progressPercent() + "%", Toast.LENGTH_SHORT).show();
     }

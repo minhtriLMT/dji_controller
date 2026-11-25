@@ -488,7 +488,7 @@ public class LocalPhotoAdapter extends BaseAdapter {
         String subtitle = new SimpleDateFormat("dd/MM/yyyy • HH:mm", Locale.US).format(new Date(file.lastModified()))
                 + String.format(Locale.US, " • %.1f MB", file.length() / 1048576.0);
         StorageAdapter.setupViewerHeader(d, file.getName(), subtitle, false);
-        ((TextView) d.findViewById(R.id.viewerHint)).setText("Ảnh đã lưu trên điện thoại");
+        ((TextView) d.findViewById(R.id.viewerHint)).setText("Ảnh đã lưu trên điện thoại • Chụm 2 ngón hoặc chạm 2 lần để phóng to");
 
         // Ảnh đã nằm trên máy -> không cần nút Tải về; giữ nút đẩy lên Cloud
         d.findViewById(R.id.viewerBtnDownload).setVisibility(View.GONE);

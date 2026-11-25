@@ -196,7 +196,7 @@ public final class UploadMeta {
     private static final Pattern XMP_ATTR = Pattern.compile("drone-dji:(\\w+)=\"([^\"]*)\"");
     private static final Pattern XMP_ELEM = Pattern.compile("<drone-dji:(\\w+)>([^<]*)</drone-dji:\\1>");
 
-    static Map<String, String> readDjiXmp(File file) {
+    public static Map<String, String> readDjiXmp(File file) {
         Map<String, String> out = new HashMap<>();
         byte[] buf = new byte[(int) Math.min(XMP_SCAN_BYTES, file.length())];
         try (InputStream in = new FileInputStream(file)) {

@@ -78,12 +78,12 @@
         android:background="@drawable/bg_st_thumb"
         android:clipToOutline="true">
 
-        <ImageView
+        <!-- Ảnh: chụm/mở 2 ngón để phóng to, kéo để di chuyển, chạm 2 lần để zoom nhanh -->
+        <com.tri.djicontrol.media.ZoomImageView
             android:id="@+id/viewerImage"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:contentDescription="Ảnh"
-            android:scaleType="fitCenter" />
+            android:contentDescription="Ảnh" />
 
         <VideoView
             android:id="@+id/viewerVideo"
