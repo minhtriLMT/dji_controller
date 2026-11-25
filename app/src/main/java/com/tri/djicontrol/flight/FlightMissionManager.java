@@ -49,6 +49,9 @@ public class FlightMissionManager {
 
         /** Nhiệm vụ dừng giữa chừng (pin yếu / drone tự về nhà) và đã lưu tiến độ để bay tiếp. */
         default void onCheckpointSaved(MissionCheckpoint checkpoint) {}
+
+        /** Chế độ chụp đứng yên: số ảnh đã đẩy lên Cloudinary (thư mục WP) / lỗi / đang đẩy. */
+        default void onCloudUpload(int uploaded, int failed, int pending, String message) {}
     }
 
     // --- Pin yếu: về nhà + lưu tiến độ để bay tiếp sau khi thay pin ---
@@ -97,8 +100,15 @@ public class FlightMissionManager {
     private static final float PHOTO_APPROACH_MIN_SPEED = 1.0f;
     /** Camera không phản hồi quá lâu thì bỏ qua ảnh này và bay tiếp. */
     private static final long PHOTO_SHOT_TIMEOUT_MS = 5000;
-    /** Ước tính tổng thời gian dừng cho 1 ảnh (phanh + ổn định + chụp) — dùng để tính thời gian bay. */
-    public static final double PHOTO_STOP_SECONDS_ESTIMATE = 4.0;
+    /** Ước tính thời gian đứng thêm ở mỗi điểm để tải ảnh gốc từ thẻ nhớ (đẩy lên Cloud chạy nền). */
+    public static final double PHOTO_UPLOAD_SECONDS_ESTIMATE = 8.0;
+    /** Ước tính tổng thời gian dừng cho 1 ảnh (phanh + ổn định + chụp + tải ảnh) — dùng để tính thời gian bay. */
+    public static final double PHOTO_STOP_SECONDS_ESTIMATE = 4.0 + PHOTO_UPLOAD_SECONDS_ESTIMATE;
+
+    /** Chụp đứng yên: tải ảnh vừa chụp và đẩy lên Cloudinary (thư mục WP) ngay tại điểm dừng. */
+    private WpPhotoUploader uploader;
+    /** Đang tải ảnh từ thẻ nhớ -> drone giữ yên, chưa bay tiếp. */
+    private boolean transferring = false;
 
     private boolean holding = false, shotFired = false;
     private double holdLat, holdLng;
@@ -241,6 +251,8 @@ public class FlightMissionManager {
         lastShotTime = 0;
         holding = false;
         shotFired = false;
+        transferring = false;
+        setupUploader();
         running = true;
         if (cp == null) {
             fullPlan = gridPoints;
@@ -608,7 +620,7 @@ public class FlightMissionManager {
             shooting = false;
             holdReleaseAtMs = now;
         }
-        if (!shooting && holdReleaseAtMs > 0 && now >= holdReleaseAtMs) {
+        if (!shooting && !transferring && holdReleaseAtMs > 0 && now >= holdReleaseAtMs) {
             holding = false; // vòng lặp sau sẽ bay tiếp tới waypoint
         }
     }
@@ -624,13 +636,46 @@ public class FlightMissionManager {
             if (err == null) {
                 photoCount++;
                 progress();
+                if (uploader != null && running) transferShotToCloud();
             } else {
                 Log.w(TAG, "Chụp lỗi: " + err.getDescription());
             }
         }));
     }
 
+    /** Chỉ dùng cho chế độ chụp đứng yên và khi đã cấu hình Cloudinary. */
+    private void setupUploader() {
+        if (uploader != null) uploader.detach();
+        uploader = null;
+        if (videoMode || camera == null || !WpPhotoUploader.isAvailable(appContext)) return;
+        uploader = new WpPhotoUploader(appContext, camera, isFlat());
+        uploader.setUploadListener((up, failed, pending, msg) -> {
+            if (listener != null) handler.post(() -> listener.onCloudUpload(up, failed, pending, msg));
+        });
+        uploader.attach();
+    }
+
+    /** Drone giữ yên trong lúc tải ảnh vừa chụp; tải xong (camera về chế độ chụp) mới bay tiếp. */
+    private void transferShotToCloud() {
+        transferring = true;
+        status("Đang tải ảnh " + photoCount + " để đẩy lên Cloud...");
+        uploader.transferLatest((ok, msg) -> {
+            transferring = false;
+            holdReleaseAtMs = System.currentTimeMillis() + PHOTO_AFTER_SHOT_MS;
+            if (!ok) Log.w(TAG, "Upload WP: " + msg);
+        });
+    }
+
+    private void releaseUploader() {
+        transferring = false;
+        if (uploader != null) uploader.detach(); // upload đang chạy nền vẫn tiếp tục
+    }
+
     private void stopCamera(Runnable then) {
+        if (uploader != null) {
+            uploader.cancel(); // đang tải dở -> trả camera về chế độ chụp
+            transferring = false;
+        }
         if (camera != null && recording) {
             camera.stopRecordVideo(err -> handler.post(() -> {
                 recording = false;
@@ -696,6 +741,7 @@ public class FlightMissionManager {
 
     private void finish(boolean completed, String msg) {
         running = false;
+        releaseUploader();
         endMissionLog(completed);
         state = State.IDLE;
         Log.d(TAG, msg);
@@ -778,6 +824,7 @@ public class FlightMissionManager {
     public void cancelMission() {
         boolean wasRunning = running;
         running = false;
+        releaseUploader();
         endMissionLog(false);
         if (loop != null) handler.removeCallbacks(loop);
         if (wasRunning && recording && camera != null) {

@@ -77,6 +77,16 @@ public class FirebaseHelper {
      */
     public static void uploadFileToFirebase(Context context, File localFile, dji.sdk.media.MediaFile mediaFile,
                                             String metaInfo, UploadCallback callback) {
+        uploadFileToFirebase(context, localFile, mediaFile, metaInfo, CloudConfig.FOLDER, null, callback);
+    }
+
+    /**
+     * Như trên nhưng chọn thư mục Cloudinary (vd CloudConfig.WP_FOLDER cho ảnh bay tự động)
+     * và tag thêm (nhiều tag ngăn cách bởi dấu phẩy, có thể null).
+     */
+    public static void uploadFileToFirebase(Context context, File localFile, dji.sdk.media.MediaFile mediaFile,
+                                            String metaInfo, String folder, String extraTags,
+                                            UploadCallback callback) {
         Handler main = new Handler(Looper.getMainLooper());
         Context app = context.getApplicationContext();
 
@@ -92,7 +102,7 @@ public class FirebaseHelper {
         new Thread(() -> {
             try {
                 Map<String, String> fields = UploadMeta.build(app, localFile, mediaFile, metaInfo);
-                String url = upload(localFile, fields, (pct, done, total) ->
+                String url = upload(localFile, fields, folder, extraTags, (pct, done, total) ->
                         main.post(() -> callback.onProgress(pct, done, total)));
                 main.post(() -> callback.onSuccess(url));
             } catch (Exception e) {
@@ -144,7 +154,8 @@ public class FirebaseHelper {
     }
 
     /** Upload theo từng phần 6MB (ảnh nhỏ chỉ 1 phần) -> có % tiến trình và chịu được mạng chập chờn. */
-    private static String upload(File file, Map<String, String> fields, Progress progress) throws Exception {
+    private static String upload(File file, Map<String, String> fields, String folder, String extraTags,
+                                 Progress progress) throws Exception {
         String endpoint = "https://api.cloudinary.com/v1_1/" + CloudConfig.CLOUD_NAME + "/auto/upload";
         String uploadId = UUID.randomUUID().toString();
         long total = file.length();
@@ -155,6 +166,7 @@ public class FirebaseHelper {
         String tags = "dji_controller";
         String missionId = fields.get("mission_id");
         if (missionId != null) tags += "," + missionId; // web lọc ảnh theo chuyến bay bằng tag
+        if (extraTags != null && !extraTags.isEmpty()) tags += "," + extraTags;
 
         progress.update(0, 0, total);
         try (RandomAccessFile raf = new RandomAccessFile(file, "r")) {
@@ -170,7 +182,7 @@ public class FirebaseHelper {
                 MultipartBody body = new MultipartBody.Builder()
                         .setType(MultipartBody.FORM)
                         .addFormDataPart("upload_preset", CloudConfig.UPLOAD_PRESET)
-                        .addFormDataPart("folder", CloudConfig.FOLDER)
+                        .addFormDataPart("folder", folder != null ? folder : CloudConfig.FOLDER)
                         .addFormDataPart("public_id", publicId)
                         .addFormDataPart("tags", tags)
                         .addFormDataPart("context", context)
